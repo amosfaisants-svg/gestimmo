@@ -1,0 +1,731 @@
+{
+  "pages": [
+    {
+      "file": "src/app/activer-compte/page.tsx",
+      "route": "/activer-compte",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 1,
+      "linksCount": 1,
+      "usesSupabase": false,
+      "usesLocalStorage": false,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/app/baux/page.tsx",
+      "route": "/app/baux",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 19,
+      "linksCount": 2,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/baux/[id]/page.tsx",
+      "route": "/app/baux/[id]",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 21,
+      "linksCount": 3,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/biens/page.tsx",
+      "route": "/app/biens",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 12,
+      "linksCount": 1,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/app/biens/[id]/page.tsx",
+      "route": "/app/biens/[id]",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 16,
+      "linksCount": 7,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/gerants/page.tsx",
+      "route": "/app/gerants",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 19,
+      "linksCount": 2,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/app/gerants/[id]/page.tsx",
+      "route": "/app/gerants/[id]",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 21,
+      "linksCount": 3,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/locataires/page.tsx",
+      "route": "/app/locataires",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 14,
+      "linksCount": 2,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/app/locataires/[id]/contrat/page.tsx",
+      "route": "/app/locataires/[id]/contrat",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 4,
+      "linksCount": 1,
+      "usesSupabase": false,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/locataires/[id]/page.tsx",
+      "route": "/app/locataires/[id]",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 36,
+      "linksCount": 7,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/logements/page.tsx",
+      "route": "/app/logements",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 13,
+      "linksCount": 2,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/logements/[id]/page.tsx",
+      "route": "/app/logements/[id]",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 12,
+      "linksCount": 7,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/notifications/page.tsx",
+      "route": "/app/notifications",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 17,
+      "linksCount": 0,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/page.tsx",
+      "route": "/app",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 21,
+      "linksCount": 15,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/paiements/page.tsx",
+      "route": "/app/paiements",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 13,
+      "linksCount": 3,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/paiements/[id]/page.tsx",
+      "route": "/app/paiements/[id]",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 3,
+      "linksCount": 1,
+      "usesSupabase": false,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/app/parametres/page.tsx",
+      "route": "/app/parametres",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 37,
+      "linksCount": 0,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/app/proprietaires/nouveau/page.tsx",
+      "route": "/app/proprietaires/nouveau",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 5,
+      "linksCount": 2,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/app/proprietaires/page.tsx",
+      "route": "/app/proprietaires",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 14,
+      "linksCount": 3,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/app/proprietaires/[id]/page.tsx",
+      "route": "/app/proprietaires/[id]",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 2,
+      "linksCount": 6,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/app/rapports/page.tsx",
+      "route": "/app/rapports",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 44,
+      "linksCount": 0,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/app/resiliations/page.tsx",
+      "route": "/app/resiliations",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 9,
+      "linksCount": 0,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/app/reversements/page.tsx",
+      "route": "/app/reversements",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 23,
+      "linksCount": 1,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/connexion/page.tsx",
+      "route": "/connexion",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 5,
+      "linksCount": 3,
+      "usesSupabase": false,
+      "usesLocalStorage": false,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/inscription/page.tsx",
+      "route": "/inscription",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 3,
+      "linksCount": 2,
+      "usesSupabase": true,
+      "usesLocalStorage": false,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/locataire/baux/page.tsx",
+      "route": "/locataire/baux",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 5,
+      "linksCount": 0,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/locataire/incidents/page.tsx",
+      "route": "/locataire/incidents",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 3,
+      "linksCount": 0,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/locataire/page.tsx",
+      "route": "/locataire",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 1,
+      "linksCount": 4,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/locataire/quittances/page.tsx",
+      "route": "/locataire/quittances",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 5,
+      "linksCount": 0,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": true
+    },
+    {
+      "file": "src/app/mot-de-passe-oublie/page.tsx",
+      "route": "/mot-de-passe-oublie",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 1,
+      "linksCount": 3,
+      "usesSupabase": false,
+      "usesLocalStorage": false,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/page.tsx",
+      "route": "/",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 0,
+      "linksCount": 0,
+      "usesSupabase": false,
+      "usesLocalStorage": false,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/proprietaire/biens/page.tsx",
+      "route": "/proprietaire/biens",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 0,
+      "linksCount": 1,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/proprietaire/page.tsx",
+      "route": "/proprietaire",
+      "isClient": true,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 0,
+      "linksCount": 2,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/proprietaire/releves/page.tsx",
+      "route": "/proprietaire/releves",
+      "isClient": true,
+      "title": "",
+      "hasModals": true,
+      "buttonsCount": 5,
+      "linksCount": 0,
+      "usesSupabase": true,
+      "usesLocalStorage": true,
+      "usesIndexedDB": false
+    },
+    {
+      "file": "src/app/tarifs/page.tsx",
+      "route": "/tarifs",
+      "isClient": false,
+      "title": "",
+      "hasModals": false,
+      "buttonsCount": 0,
+      "linksCount": 6,
+      "usesSupabase": false,
+      "usesLocalStorage": false,
+      "usesIndexedDB": false
+    }
+  ],
+  "brokenLinks": [],
+  "anchorLinks": [],
+  "externalLinks": [
+    {
+      "file": "src/app/tarifs/page.tsx",
+      "line": 73,
+      "rawHref": "mailto:commercial@gestimmo.ci?subject=Demande%20de%20devis%20offre%20Entreprise%20GESTIMMO"
+    }
+  ],
+  "buttons": [
+    {
+      "file": "src/app/app/baux/page.tsx",
+      "line": 905,
+      "text": "Consulter",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/baux/[id]/page.tsx",
+      "line": 741,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/biens/page.tsx",
+      "line": 598,
+      "text": "Détails",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/biens/[id]/page.tsx",
+      "line": 245,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/biens/[id]/page.tsx",
+      "line": 375,
+      "text": "Créer un bail",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/biens/[id]/page.tsx",
+      "line": 381,
+      "text": "Détails",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/biens/[id]/page.tsx",
+      "line": 449,
+      "text": "Ajouter un logement",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/gerants/page.tsx",
+      "line": 942,
+      "text": "Profil",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/gerants/[id]/page.tsx",
+      "line": 258,
+      "text": "Retour à la liste des gérants",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/gerants/[id]/page.tsx",
+      "line": 683,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/locataires/[id]/contrat/page.tsx",
+      "line": 146,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/locataires/[id]/page.tsx",
+      "line": 1056,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/locataires/[id]/page.tsx",
+      "line": 1267,
+      "text": "Voir tout",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/logements/page.tsx",
+      "line": 794,
+      "text": "Créer un bail",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/logements/page.tsx",
+      "line": 800,
+      "text": "Détails",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/logements/[id]/page.tsx",
+      "line": 200,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/logements/[id]/page.tsx",
+      "line": 223,
+      "text": "Louer",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/logements/[id]/page.tsx",
+      "line": 353,
+      "text": "Voir le contrat",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/logements/[id]/page.tsx",
+      "line": 362,
+      "text": "Créer un bail",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/page.tsx",
+      "line": 895,
+      "text": "Locataires",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/page.tsx",
+      "line": 900,
+      "text": "Encaisser un loyer",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/page.tsx",
+      "line": 906,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/page.tsx",
+      "line": 1643,
+      "text": "Encaisser",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/page.tsx",
+      "line": 1735,
+      "text": "Reverser",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/page.tsx",
+      "line": 1739,
+      "text": "Détails",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/paiements/page.tsx",
+      "line": 1125,
+      "text": "Voir",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": true
+    },
+    {
+      "file": "src/app/app/paiements/page.tsx",
+      "line": 1128,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": true
+    },
+    {
+      "file": "src/app/app/paiements/[id]/page.tsx",
+      "line": 132,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/proprietaires/nouveau/page.tsx",
+      "line": 287,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/proprietaires/nouveau/page.tsx",
+      "line": 298,
+      "text": "Annuler",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/proprietaires/page.tsx",
+      "line": 198,
+      "text": "Nouveau propriétaire",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/proprietaires/page.tsx",
+      "line": 347,
+      "text": "Modifier",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/proprietaires/[id]/page.tsx",
+      "line": 125,
+      "text": "[Icon/No-Text]",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/proprietaires/[id]/page.tsx",
+      "line": 144,
+      "text": "Aller aux reversements",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": false
+    },
+    {
+      "file": "src/app/app/reversements/page.tsx",
+      "line": 1492,
+      "text": "Bilan",
+      "isSubmit": false,
+      "hasOnClick": false,
+      "isDisabled": true
+    }
+  ],
+  "alertCalls": [
+    {
+      "file": "src/app/app/locataires/[id]/page.tsx",
+      "line": 1923,
+      "text": "{ e.stopPropagation(); if (doc.base64) { const a = document.createElement('a'); a.href = doc.base64; a.download = doc.name; a.click(); } else { alert(\"Le fichier source n'est pas disponible pour le téléchargement.\"); } }} className=\"text-sm text-primary hover:underline whitespace-nowrap\" > Télécharger",
+      "snippet": "alert()"
+    },
+    {
+      "file": "src/app/app/parametres/page.tsx",
+      "line": 1512,
+      "text": "{ setIsImporting(true); try { const ok = await syncRestoredDataToSupabase(); if (ok) { showToast(\"Données synchronisées et enregistrées dans la base de données Supabase !\"); setTimeout(() => window.location.reload(), 1200); } else { alert(\"Aucune donnée locale à synchroniser ou erreur de connexion Supabase.\"); } } catch (err) { console.error(err); alert(\"Erreur lors de la synchronisation vers la base de données.\"); } finally { setIsImporting(false); } }} disabled={isImporting} className=\"w-full bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-emerald-700 transition-colors flex items-center justify-center shadow-sm disabled:opacity-50\" > {isImporting ? ( <> Enregistrement en cours... ) : ( <> Enregistrer les données vers Supabase )}",
+      "snippet": "alert()"
+    }
+  ],
+  "emptyHandlers": [],
+  "formsWithoutSubmit": []
+}

@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-app-bg text-gray-900 antialiased;
+  }
+
+  /* ─── Saisies en majuscules (affichage) ─────────────────────────────────── */
+  input:not([type="email"]):not([type="password"]):not([type="number"]):not([type="date"]):not([type="month"]):not([type="time"]):not([type="datetime-local"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([data-no-upper="true"]),
+  textarea:not([data-no-upper="true"]) {
+    text-transform: uppercase;
+  }
+}
+
