@@ -17,14 +17,19 @@ export default function ConnexionPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
+    // Prefetch all destination spaces in the background for instant transition
+    router.prefetch("/app");
+    router.prefetch("/locataire");
+    router.prefetch("/proprietaire");
+
     // Only redirect if this specific tab already has an active session established
     const tabPortal = typeof window !== "undefined" ? sessionStorage.getItem("gestimmo_tab_portal") : null;
     if (tabPortal === "LOCATAIRE" && getPortalSession("LOCATAIRE")) {
-      router.push("/locataire");
+      router.replace("/locataire");
     } else if (tabPortal === "PROPRIETAIRE" && getPortalSession("PROPRIETAIRE")) {
-      router.push("/proprietaire");
+      router.replace("/proprietaire");
     } else if (tabPortal === "ADMIN" && getPortalSession("ADMIN")) {
-      router.push("/app");
+      router.replace("/app");
     }
   }, [router]);
 
@@ -54,7 +59,7 @@ export default function ConnexionPage() {
         role: "Locataire"
       };
       setPortalSession("LOCATAIRE", tenantUser);
-      router.push("/locataire");
+      router.replace("/locataire");
       return;
     }
 
@@ -73,7 +78,7 @@ export default function ConnexionPage() {
         role: "Propriétaire"
       };
       setPortalSession("PROPRIETAIRE", ownerUser);
-      router.push("/proprietaire");
+      router.replace("/proprietaire");
       return;
     }
 
@@ -92,7 +97,7 @@ export default function ConnexionPage() {
       const roleKey = isGerant ? "GERANT" : (companyUser.role?.toUpperCase() || "ADMIN");
 
       setPortalSession("ADMIN", { ...companyUser, userRole: roleKey });
-      router.push("/app");
+      router.replace("/app");
       return;
     }
 

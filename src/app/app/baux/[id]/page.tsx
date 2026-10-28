@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { ArrowLeft, FileText, Calendar, Download, Printer, UserMinus, ShieldCheck, X, MapPin, IdCard, PenLine, CheckCircle2, Save, Trash2, Upload, Eye, FileCheck } from "lucide-react";
 import Link from "next/link";
-import { getPdfTemplate } from "@/lib/storage";
+import { getPdfTemplate, getGenericTemplate, getOrGenerateContratTemplate } from "@/lib/storage";
 import PdfContractEditor from "@/components/ui/PdfContractEditor";
 import { checkAndAutoRenewLeases } from "@/lib/leaseRenewal";
 import { formatUnitDisplay, getLeaseDisplayCode, isUnitOccupied } from "@/lib/utils";
@@ -308,11 +308,24 @@ export default function LeaseDetailsPage({ params }: { params: { id: string } })
     const pageToOpen = typeof initialPageNum === "number" ? initialPageNum : 1;
     const contractDoc = documents.find((d: any) => d.isContract || (d.name && d.name.toLowerCase().includes("contrat")));
     let base64 = contractDoc?.base64;
-    if (!base64) base64 = await getPdfTemplate();
-    if (!base64) base64 = localStorage.getItem("gestimmo_modele_contrat");
+    if (!base64 && ownerInfo) {
+      try {
+        const storedOwners = localStorage.getItem("gestimmo_proprietaires");
+        if (storedOwners) {
+          const owners = JSON.parse(storedOwners);
+          const o = owners.find((x: any) => 
+            (x.name && x.name.trim().toLowerCase() === ownerInfo.trim().toLowerCase()) ||
+            (x.full_name && x.full_name.trim().toLowerCase() === ownerInfo.trim().toLowerCase()) ||
+            (x.id && x.id === ownerInfo)
+          );
+          if (o?.templates?.contratFileKey) {
+            base64 = await getGenericTemplate(o.templates.contratFileKey);
+          }
+        }
+      } catch (e) {}
+    }
     if (!base64) {
-      alert("Aucun modèle de contrat configuré. Importez-en un depuis les Paramètres.");
-      return;
+      base64 = await getOrGenerateContratTemplate(ownerInfo);
     }
     setContractPdfBase64(base64);
     setInitialContractPage(pageToOpen);
@@ -710,6 +723,7 @@ export default function LeaseDetailsPage({ params }: { params: { id: string } })
       };
       reader.readAsDataURL(file);
     }
+    e.target.value = '';
   };
 
   const handleResilier = () => {
@@ -944,7 +958,13 @@ export default function LeaseDetailsPage({ params }: { params: { id: string } })
                       </button>
                       <label className="px-2.5 py-1 text-gray-700 bg-white border border-app-border rounded-md hover:bg-gray-100 transition-colors flex items-center gap-1 font-medium cursor-pointer">
                         <Upload className="w-3.5 h-3.5 text-gray-500" /> Remplacer
-                        <input type="file" accept="application/pdf,image/png,image/jpeg" className="hidden" onChange={handleImportContract} />
+                        <input
+                          type="file"
+                          accept=".pdf,application/pdf,image/png,image/jpeg"
+                          className="hidden"
+                          onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+                          onChange={handleImportContract}
+                        />
                       </label>
                     </div>
                   </div>

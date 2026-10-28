@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Plus, Search, Building2, X, Save, Trash2, Pencil, CheckSquare } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
@@ -23,12 +24,14 @@ const initialUnits = [
   { id: "V-001", property: "Villa Palmeraie", type: "Villa", rent: 800000, tenant: "Jean Dupont", status: "OCCUPÉ" },
 ];
 
-export default function LogementsPage() {
+function LogementsPageInner() {
   const { can } = usePermissions();
+  const searchParams = useSearchParams();
 
   const [units, setUnits] = useState<any[]>([]);
   const [biens, setBiens] = useState<any[]>([]);
   const [baux, setBaux] = useState<any[]>([]);
+  const [preavisList, setPreavisList] = useState<any[]>([]);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("Tous statuts");
@@ -58,6 +61,7 @@ export default function LogementsPage() {
         setBiens(dbState.properties);
         setOwners(dbState.owners);
         setBaux(dbState.leases);
+        setPreavisList(dbState.leaseNotices || []);
       } else {
         const storedBiens = localStorage.getItem("gestimmo_biens");
         setBiens(storedBiens ? JSON.parse(storedBiens) : []);
@@ -65,6 +69,8 @@ export default function LogementsPage() {
         setOwners(storedOwners ? JSON.parse(storedOwners) : []);
         const storedBaux = localStorage.getItem("gestimmo_baux");
         setBaux(storedBaux ? JSON.parse(storedBaux) : []);
+        const storedPreavis = localStorage.getItem("gestimmo_preavis");
+        setPreavisList(storedPreavis ? JSON.parse(storedPreavis) : []);
         const storedUnits = localStorage.getItem("gestimmo_logements");
         setUnits(storedUnits ? JSON.parse(storedUnits) : initialUnits);
       }
@@ -74,11 +80,28 @@ export default function LogementsPage() {
 
     window.addEventListener("storage", initData);
     window.addEventListener("gestimmo_logements_updated", initData);
+    window.addEventListener("gestimmo_preavis_updated", initData);
     return () => {
       window.removeEventListener("storage", initData);
       window.removeEventListener("gestimmo_logements_updated", initData);
+      window.removeEventListener("gestimmo_preavis_updated", initData);
     };
   }, []);
+
+  // Listen to URL status filter (Occupés, Non occupés, En préavis)
+  useEffect(() => {
+    const rawStatus = searchParams.get("status") || searchParams.get("statut");
+    if (rawStatus) {
+      const lower = rawStatus.toLowerCase().trim();
+      if (lower.includes("occup") && !lower.includes("non")) {
+        setStatusFilter("Occupés");
+      } else if (lower.includes("non") || lower.includes("vacant")) {
+        setStatusFilter("Non occupés");
+      } else if (lower.includes("preavis") || lower.includes("préavis")) {
+        setStatusFilter("En préavis");
+      }
+    }
+  }, [searchParams]);
 
 
   const handleDeleteLogement = async (id: string) => {
@@ -353,15 +376,36 @@ export default function LogementsPage() {
 
   const unitsWithDynamicStatus = units.map(unit => {
     const unitNomenclature = (unit.unit || unit.id || "").toString();
+
+    // Check if unit is in preavis
+    const hasActiveNotice = preavisList.some((p: any) => 
+      (p.status === "EN PRÉAVIS" || p.status === "En préavis") && (
+        (p.unit && p.unit.trim().toUpperCase() === unitNomenclature.trim().toUpperCase()) ||
+        (p.unitId && p.unitId === unit.id) ||
+        (p.unit && unit.id && p.unit.trim().toUpperCase() === unit.id.trim().toUpperCase())
+      )
+    );
+
     // Check if there is an active lease for this unit AND specific property
     const activeLease = baux.find(b => 
       b.unit && (
         b.unit.trim().toUpperCase() === unitNomenclature.trim().toUpperCase() ||
         b.unit.trim().toUpperCase() === (unit.id || "").trim().toUpperCase()
       ) &&
-      (b.status === "ACTIF" || b.status === "Actif" || b.status === "actif") &&
+      (b.status === "ACTIF" || b.status === "Actif" || b.status === "actif" || b.status === "EN PRÉAVIS") &&
       ((!b.property || !unit.property) || b.property.trim().toUpperCase() === unit.property.trim().toUpperCase())
     );
+
+    const isPreavis = hasActiveNotice || activeLease?.status === "EN PRÉAVIS" || unit.status === "EN PRÉAVIS";
+
+    if (isPreavis) {
+      return { 
+        ...unit, 
+        status: "EN PRÉAVIS", 
+        tenant: activeLease?.tenant || unit.tenant || "-" 
+      };
+    }
+
     if (activeLease) {
       return { ...unit, status: "OCCUPÉ", tenant: activeLease.tenant };
     }
@@ -380,7 +424,9 @@ export default function LogementsPage() {
     if (statusFilter === "Occupés") {
       matchStatus = unit.status === "OCCUPÉ";
     } else if (statusFilter === "Non occupés") {
-      matchStatus = unit.status === "NON OCCUPÉ";
+      matchStatus = unit.status === "NON OCCUPÉ" || unit.status === "VACANT" || unit.status === "Vacant";
+    } else if (statusFilter === "En préavis") {
+      matchStatus = unit.status === "EN PRÉAVIS";
     }
 
     let matchOwner = true;
@@ -711,13 +757,14 @@ export default function LogementsPage() {
               </select>
 
               <select 
-                className="border border-app-border rounded-lg px-3 py-2 text-sm bg-white font-medium text-gray-700 outline-none focus:ring-2 focus:ring-primary/20"
+                className="border border-app-border rounded-lg px-3 py-2 text-sm bg-white font-medium text-gray-700 outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
-                <option>Tous statuts</option>
-                <option>Occupés</option>
-                <option>Non occupés</option>
+                <option value="Tous statuts">Tous statuts</option>
+                <option value="Occupés">Occupés</option>
+                <option value="Non occupés">Vacants / Non occupés</option>
+                <option value="En préavis">En préavis</option>
               </select>
             </div>
           </div>
@@ -772,7 +819,11 @@ export default function LogementsPage() {
                       {formatFCFA(unit.rent)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <Badge dot variant={unit.status === "OCCUPÉ" ? "success" : "default"} className={unit.status === "NON OCCUPÉ" ? "bg-gray-100 text-gray-600 hover:bg-gray-200 border-none" : ""}>
+                      <Badge 
+                        dot 
+                        variant={unit.status === "OCCUPÉ" ? "success" : unit.status === "EN PRÉAVIS" ? "warning" : "default"} 
+                        className={unit.status === "NON OCCUPÉ" ? "bg-gray-100 text-gray-600 hover:bg-gray-200 border-none" : ""}
+                      >
                         {unit.status}
                       </Badge>
                     </td>
@@ -834,5 +885,13 @@ export default function LogementsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LogementsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-gray-500">Chargement des logements...</div>}>
+      <LogementsPageInner />
+    </Suspense>
   );
 }

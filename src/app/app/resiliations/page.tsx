@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { Badge } from "@/components/ui/Badge";
+import { useSearchParams } from "next/navigation";
 import { 
   Search, UserMinus, Calendar, Plus, FileText, CheckCircle2, 
   Clock, AlertTriangle, Printer, Download, X, ArrowRight, ShieldCheck, 
@@ -85,8 +86,9 @@ const defaultPreavisList = [
   },
 ];
 
-export default function ResiliationsPage() {
+function ResiliationsPageInner() {
   const { can } = usePermissions();
+  const searchParams = useSearchParams();
 
   const [preavisList, setPreavisList] = useState<any[]>([]);
   const [leases, setLeases] = useState<any[]>([]);
@@ -142,6 +144,19 @@ export default function ResiliationsPage() {
       } catch (e) {}
     }
   }, []);
+
+  // Listen to URL status filter (preavis, etc.)
+  useEffect(() => {
+    const rawStatus = searchParams.get("status") || searchParams.get("statut");
+    if (rawStatus) {
+      const lower = rawStatus.toLowerCase().trim();
+      if (lower.includes("preavis") || lower.includes("préavis") || lower.includes("actif")) {
+        setStatusFilter("En préavis");
+      } else if (lower.includes("termin") || lower.includes("clotur") || lower.includes("resili")) {
+        setStatusFilter("Terminé");
+      }
+    }
+  }, [searchParams]);
 
   const savePreavisList = (newList: any[]) => {
     setPreavisList(newList);
@@ -899,5 +914,13 @@ export default function ResiliationsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ResiliationsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-gray-500">Chargement des préavis et résiliations...</div>}>
+      <ResiliationsPageInner />
+    </Suspense>
   );
 }

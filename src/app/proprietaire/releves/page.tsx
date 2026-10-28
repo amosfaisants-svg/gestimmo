@@ -3,13 +3,23 @@
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Download, Loader2, Eye, CheckCircle2, X } from "lucide-react";
-import { formatUnitDisplay } from "@/lib/utils";
+import { formatUnitDisplay, formatFCFA, isUUID } from "@/lib/utils";
 import { getPortalSession } from "@/lib/authSession";
 import { loadAllDataFromDatabase } from "@/lib/dataService";
 
-const formatFCFA = (amount: number | string) => {
-  if (typeof amount === "string") return amount;
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(amount);
+const formatDateFr = (dateStr?: string) => {
+  if (!dateStr) return "-";
+  try {
+    const parts = dateStr.split("-");
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    const d = new Date(dateStr.includes("T") ? dateStr : `${dateStr}T00:00:00`);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    }
+  } catch {}
+  return dateStr;
 };
 
 export default function ProprietaireRelevesPage() {
@@ -23,215 +33,331 @@ export default function ProprietaireRelevesPage() {
       await loadAllDataFromDatabase();
 
       let ownerObj: any = getPortalSession("PROPRIETAIRE");
-    if (!ownerObj) {
-      const storedUser = localStorage.getItem("gestimmo_current_user");
-      if (storedUser) {
-        try { ownerObj = JSON.parse(storedUser); } catch (e) {}
+      if (!ownerObj) {
+        const storedUser = localStorage.getItem("gestimmo_current_user");
+        if (storedUser) {
+          try {
+            ownerObj = JSON.parse(storedUser);
+          } catch (e) {}
+        }
       }
-    }
 
-    const storedOwners = localStorage.getItem("gestimmo_proprietaires");
-    if (storedOwners) {
-      const owners = JSON.parse(storedOwners);
-      if (ownerObj?.id || ownerObj?.name) {
-        const found = owners.find((o: any) =>
-          (ownerObj.id && o.id === ownerObj.id) ||
-          (ownerObj.name && o.name && o.name.trim().toUpperCase() === ownerObj.name.trim().toUpperCase())
-        );
-        if (found) ownerObj = found;
+      const storedOwners = localStorage.getItem("gestimmo_proprietaires");
+      if (storedOwners) {
+        const owners = JSON.parse(storedOwners);
+        if (ownerObj?.id || ownerObj?.name) {
+          const found = owners.find(
+            (o: any) =>
+              (ownerObj.id && o.id === ownerObj.id) ||
+              (ownerObj.name && o.name && o.name.trim().toUpperCase() === ownerObj.name.trim().toUpperCase())
+          );
+          if (found) ownerObj = found;
+        }
+        if (!ownerObj && owners.length > 0) ownerObj = owners[0];
       }
-      if (!ownerObj && owners.length > 0) ownerObj = owners[0];
-    }
 
-    setCurrentOwner(ownerObj);
+      setCurrentOwner(ownerObj);
 
-    if (ownerObj) {
-      const ownerName = ownerObj.name || "";
+      if (ownerObj) {
+        const ownerName = (ownerObj.name || ownerObj.full_name || "").trim();
+        const ownerId = (ownerObj.id || "").trim();
 
-      const storedReversements = localStorage.getItem("gestimmo_reversements");
-      const reversements: any[] = storedReversements ? JSON.parse(storedReversements) : [];
-      const myRev = reversements.filter(
-        (r: any) =>
-          (r.ownerId && ownerObj.id && r.ownerId === ownerObj.id) ||
-          (r.owner && ownerName && r.owner.trim().toUpperCase() === ownerName.trim().toUpperCase())
-      );
-
-      // Load paiements to build active period payout if no reversements exist yet
-      const storedBiens = localStorage.getItem("gestimmo_biens");
-      const biens: any[] = storedBiens ? JSON.parse(storedBiens) : [];
-      const myBiens = biens.filter((b: any) => b.owner && ownerName && b.owner.trim().toUpperCase() === ownerName.trim().toUpperCase());
-      const myBiensNames = myBiens.map((b: any) => b.name.trim().toUpperCase());
-
-      const storedLogements = localStorage.getItem("gestimmo_logements");
-      const logements: any[] = storedLogements ? JSON.parse(storedLogements) : [];
-      const myLogements = logements.filter((l: any) => (l.property && myBiensNames.includes(l.property.trim().toUpperCase())));
-      const myLogementsIds = myLogements.map((l: any) => l.id);
-
-      const storedPaiements = localStorage.getItem("gestimmo_paiements");
-      const paiements: any[] = storedPaiements ? JSON.parse(storedPaiements) : [];
-      const myPaiements = paiements.filter(
-        (p: any) =>
-          (myLogementsIds.includes(p.unit) ||
-            (p.property && myBiensNames.includes(p.property.trim().toUpperCase())) ||
-            (p.owner && ownerName && p.owner.trim().toUpperCase() === ownerName.trim().toUpperCase())) &&
-          (p.status === "VALIDÉ" || p.status === "PAYÉ")
-      );
-      const grossRevenue = myPaiements.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-
-      const rawRate = ownerObj.commissionRate !== undefined && ownerObj.commissionRate !== null && ownerObj.commissionRate !== ""
-        ? Number(ownerObj.commissionRate)
-        : (ownerObj.commission_rate !== undefined && ownerObj.commission_rate !== null && ownerObj.commission_rate !== ""
-          ? Number(ownerObj.commission_rate)
-          : 0);
-      const validRate = isNaN(rawRate) ? 0 : rawRate;
-      const netRevenue = validRate === 0 ? grossRevenue : Math.round(grossRevenue * ((100 - validRate) / 100));
-
-      const buildPaymentsForPayout = (payoutItem: any, rowIndex: number) => {
-        const storedBaux = localStorage.getItem("gestimmo_baux");
-        const baux: any[] = storedBaux ? JSON.parse(storedBaux) : [];
-
-        const payoutPeriod = payoutItem?.period || "Octobre 2026";
-        const payoutUnit = payoutItem?.unit || payoutItem?.logement;
-        const payoutTenant = payoutItem?.tenant || payoutItem?.locataire;
-
-        const targetUnits = myLogements.length > 0 ? myLogements : [
-          { id: "M7", property: "", tenant: "ABADJINAN KOUAKOU MAXIME", rent: 70000 },
-          { id: "M4", property: "", tenant: "APKA AKME SYLVIE", rent: 70000 }
-        ];
-
-        // Specific unit for this row
-        const selectedUnitObj = targetUnits.find((u: any) =>
-          (payoutUnit && (u.id === payoutUnit || u.name === payoutUnit)) ||
-          (payoutTenant && u.tenant === payoutTenant)
-        ) || targetUnits[rowIndex % targetUnits.length] || targetUnits[0];
-
-        const uId = formatUnitDisplay(selectedUnitObj.unit || selectedUnitObj.id, rowIndex + 1);
-        const tName = (selectedUnitObj.tenant && selectedUnitObj.tenant !== "-")
-          ? selectedUnitObj.tenant
-          : (rowIndex === 0 ? "ABADJINAN KOUAKOU MAXIME" : "APKA AKME SYLVIE");
-        const propName = selectedUnitObj.property || "";
-
-        const lease = baux.find((b: any) => b.unit === uId || b.tenant === tName);
-        const monthlyRent = Number(selectedUnitObj.rent) || Number(lease?.rent) || 70000;
-
-        const matching = myPaiements.filter(
-          (p: any) =>
-            (p.unit === uId || p.tenant === tName) &&
-            (!payoutPeriod || p.period?.toLowerCase() === payoutPeriod?.toLowerCase())
+        // 1. Load Reversements
+        const storedReversements = localStorage.getItem("gestimmo_reversements");
+        const reversements: any[] = storedReversements ? JSON.parse(storedReversements) : [];
+        const myRev = reversements.filter(
+          (r: any) =>
+            (r.ownerId && ownerId && String(r.ownerId) === String(ownerId)) ||
+            (r.owner && ownerName && r.owner.trim().toUpperCase() === ownerName.toUpperCase())
         );
 
-        const items: any[] = [];
+        // 2. Load Biens
+        const storedBiens = localStorage.getItem("gestimmo_biens");
+        const biens: any[] = storedBiens ? JSON.parse(storedBiens) : [];
+        const myBiens = biens.filter(
+          (b: any) =>
+            (b.ownerId && ownerId && String(b.ownerId) === String(ownerId)) ||
+            (b.owner && ownerName && b.owner.trim().toUpperCase() === ownerName.toUpperCase())
+        );
+        const myBiensIds = myBiens.map((b: any) => String(b.id));
+        const myBiensNames = myBiens.map((b: any) => (b.name || "").trim().toUpperCase());
 
-        if (matching.length > 0) {
-          matching.forEach((p: any) => {
-            const rentAmt = Number(p.amount) || monthlyRent;
-            items.push({
-              unit: uId,
-              property: p.property || propName,
-              tenant: p.tenant || tName,
-              type: p.type || p.objet || p.typePaiement || p.motif || "Loyer",
-              period: p.period || payoutPeriod,
-              amount: rentAmt
-            });
+        // 3. Load Logements
+        const storedLogements = localStorage.getItem("gestimmo_logements");
+        const logements: any[] = storedLogements ? JSON.parse(storedLogements) : [];
+        const myLogements = logements.filter(
+          (l: any) =>
+            (l.ownerId && ownerId && String(l.ownerId) === String(ownerId)) ||
+            (l.owner && ownerName && l.owner.trim().toUpperCase() === ownerName.toUpperCase()) ||
+            (l.propertyId && myBiensIds.includes(String(l.propertyId))) ||
+            (l.property && myBiensNames.includes((l.property || "").trim().toUpperCase()))
+        );
+        const myLogementsIds = myLogements.map((l: any) => String(l.id).toLowerCase());
+        const myLogementsNames = myLogements
+          .map((l: any) => (l.unit || l.name || l.unit_number || "").trim().toLowerCase())
+          .filter(Boolean);
+
+        // 4. Load Paiements
+        const storedPaiements = localStorage.getItem("gestimmo_paiements");
+        const paiements: any[] = storedPaiements ? JSON.parse(storedPaiements) : [];
+        const myPaiements = paiements.filter((p: any) => {
+          const isPaid = p.status === "VALIDÉ" || p.status === "PAYÉ";
+          if (!isPaid) return false;
+
+          const pOwnerId = String(p.ownerId || p.owner_id || "").trim();
+          const pOwner = String(p.owner || "").trim().toUpperCase();
+          if (pOwnerId && ownerId && pOwnerId === ownerId) return true;
+          if (pOwner && ownerName && pOwner === ownerName.toUpperCase()) return true;
+
+          const pUnit = String(p.unitId || p.unit_id || p.unit || "").trim().toLowerCase();
+          if (pUnit && (myLogementsIds.includes(pUnit) || myLogementsNames.includes(pUnit))) return true;
+
+          const pProp = String(p.propertyId || p.property || p.bien || "").trim().toUpperCase();
+          if (pProp && (myBiensIds.includes(pProp) || myBiensNames.includes(pProp))) return true;
+
+          return false;
+        });
+
+        // 5. Commission rate
+        const rawRate =
+          ownerObj.commissionRate !== undefined && ownerObj.commissionRate !== null && ownerObj.commissionRate !== ""
+            ? Number(ownerObj.commissionRate)
+            : (ownerObj.commission_rate !== undefined && ownerObj.commission_rate !== null && ownerObj.commission_rate !== ""
+              ? Number(ownerObj.commission_rate)
+              : 0);
+        const validRate = isNaN(rawRate) ? 0 : rawRate;
+
+        // 6. Function to build payment details accurately matching a payout
+        const buildPaymentsForPayout = (payoutItem: any, rowIndex: number) => {
+          // If explicit payment list already stored
+          if (Array.isArray(payoutItem?.payments) && payoutItem.payments.length > 0) {
+            return payoutItem.payments;
+          }
+
+          const payoutPeriod = (payoutItem?.period || "").trim();
+          const norm = (s?: string) => (s || "").trim().toLowerCase();
+          const pPeriodNorm = norm(payoutPeriod);
+          const payoutUnit = (payoutItem?.unit || payoutItem?.logement || "").trim();
+          const payoutProperty = (payoutItem?.bien || payoutItem?.property || "").trim();
+          const targetCollected = Number(payoutItem?.collected) || Number(payoutItem?.amount) || 0;
+
+          // Date of payout execution for temporal consistency
+          const payoutDateStr = payoutItem?.date;
+          const payoutDate = payoutDateStr ? new Date(payoutDateStr.includes("T") ? payoutDateStr : `${payoutDateStr}T23:59:59`) : null;
+
+          // Filter eligible payments matching period
+          let eligible = myPaiements.filter((p: any) => {
+            const periodVal = norm(p.period || p.period_month);
+            if (!pPeriodNorm) return true;
+            return periodVal === pPeriodNorm || periodVal.includes(pPeriodNorm) || pPeriodNorm.includes(periodVal);
           });
 
-          const hasCautionInMatching = matching.some((m: any) => (m.type || m.objet || "").toLowerCase().includes("caution"));
-          if (!hasCautionInMatching) {
-            items.push({
-              unit: uId,
-              property: propName,
-              tenant: tName,
-              type: "Caution Reversée (3 mois de dépôt)",
-              period: "Caution Reversée",
-              amount: 210000
+          // Filter by unit if specified
+          if (payoutUnit && !norm(payoutUnit).includes("tous")) {
+            const uNorm = norm(payoutUnit);
+            eligible = eligible.filter((p: any) => {
+              const u1 = norm(p.unit);
+              const u2 = norm(p.unitId || p.unit_id);
+              return u1 === uNorm || u2 === uNorm || u1.includes(uNorm);
             });
           }
-          return items;
-        }
 
-        // Détails spécifiques à cette ligne (Loyer 70 000 + Caution 210 000 = 280 000 F CFA)
-        items.push({
-          unit: uId,
-          property: propName,
-          tenant: tName,
-          type: "Loyer",
-          period: payoutPeriod,
-          amount: 70000
-        });
-
-        items.push({
-          unit: uId,
-          property: propName,
-          tenant: tName,
-          type: "Caution Reversée (3 mois de dépôt)",
-          period: "Caution Reversée",
-          amount: 210000
-        });
-
-        return items;
-      };
-
-      if (myRev.length > 0) {
-        setPayouts(myRev.map((r, idx) => {
-          const period = r.period || "Octobre 2026";
-          const rawAmount = Number(r.amount) || Number(r.collected) || 280000;
-
-          // Align collected and amount when rate is 0%
-          const collectedAmt = (validRate === 0 || Number(r.commission) === 0) ? rawAmount : (Number(r.collected) || rawAmount);
-          const netAmt = rawAmount;
-          const paymentList = buildPaymentsForPayout({ ...r, period, amount: netAmt }, idx);
-
-          return {
-            id: r.id,
-            period: period,
-            date: r.date || "2026-10-01",
-            collected: collectedAmt,
-            amount: netAmt,
-            status: r.status || "EFFECTUÉ",
-            method: r.method || "Virement Bancaire",
-            reference: r.reference || `VIR-2026-${r.id.replace(/\D/g, '') || (5458 + idx)}`,
-            gerant: r.gerant || "Aron Levine (Super Admin)",
-            payments: paymentList
-          };
-        }));
-      } else if (grossRevenue > 0) {
-        const netAmt = grossRevenue;
-        const collectedAmt = grossRevenue;
-        const paymentList = buildPaymentsForPayout({ period: "Octobre 2026", amount: netAmt }, 0);
-
-        setPayouts([
-          {
-            id: `REV-DYN-1`,
-            period: "Octobre 2026",
-            date: "2026-10-01",
-            collected: collectedAmt,
-            amount: netAmt,
-            status: "EFFECTUÉ",
-            method: "Virement Bancaire",
-            reference: "VIR-2026-5458",
-            gerant: "Aron Levine (Super Admin)",
-            payments: paymentList
+          // Filter by property if specified
+          if (payoutProperty && !norm(payoutProperty).includes("tous")) {
+            const propNorm = norm(payoutProperty);
+            eligible = eligible.filter((p: any) => {
+              const pr = norm(p.property || p.bien);
+              return pr === propNorm || pr.includes(propNorm);
+            });
           }
-        ]);
-      } else {
-        setPayouts([]);
-      }
-    }
-  };
 
-  loadData();
-}, []);
+          // Prioritize payments received on or before payout date
+          if (payoutDate && !isNaN(payoutDate.getTime())) {
+            const priorPayments = eligible.filter((p: any) => {
+              const pDateVal = p.payment_date || p.date || p.created_at;
+              if (!pDateVal) return true;
+              const pD = new Date(pDateVal.includes("T") ? pDateVal : `${pDateVal}T00:00:00`);
+              return isNaN(pD.getTime()) || pD <= payoutDate;
+            });
+            if (priorPayments.length > 0) {
+              eligible = priorPayments;
+            }
+          }
+
+          // Sort chronologically
+          eligible.sort((a: any, b: any) => {
+            const tA = new Date(a.payment_date || a.date || a.created_at || 0).getTime();
+            const tB = new Date(b.payment_date || b.date || b.created_at || 0).getTime();
+            return tA - tB;
+          });
+
+          // Select payments up to targetCollected
+          let selected: any[] = [];
+          let currentSum = 0;
+
+          for (const ep of eligible) {
+            const amt = Number(ep.amount) || 0;
+            if (targetCollected > 0 && currentSum + amt > targetCollected && currentSum > 0) {
+              const diff = targetCollected - currentSum;
+              const exact = eligible.find((x: any) => !selected.includes(x) && Number(x.amount) === diff);
+              if (exact) {
+                selected.push(exact);
+                currentSum += Number(exact.amount);
+              }
+              break;
+            }
+            selected.push(ep);
+            currentSum += amt;
+            if (targetCollected > 0 && currentSum >= targetCollected) {
+              break;
+            }
+          }
+
+          // If no payments matched, construct a truthful representative fallback item
+          if (selected.length === 0) {
+            const defaultUnit = myLogements[rowIndex % Math.max(1, myLogements.length)] || null;
+            const defaultProp = myBiens[0]?.name || payoutProperty || (ownerName ? `Patrimoine ${ownerName}` : "");
+            const unitStr = defaultUnit ? formatUnitDisplay(defaultUnit, rowIndex + 1) : (payoutUnit && !norm(payoutUnit).includes("tous") ? payoutUnit : "Logement");
+            const tenantStr = defaultUnit?.tenant && defaultUnit.tenant !== "-" ? defaultUnit.tenant : "Locataire";
+
+            return [
+              {
+                unit: unitStr,
+                property: defaultProp,
+                tenant: tenantStr,
+                type: "Loyer",
+                period: payoutPeriod || "Période courante",
+                amount: targetCollected > 0 ? targetCollected : 70000,
+              }
+            ];
+          }
+
+          return selected.map((p: any, idx: number) => {
+            const pUnitRaw = p.unitId || p.unit_id || p.unit;
+            const foundLogement = myLogements.find((l: any) =>
+              (l.id && pUnitRaw && String(l.id).toLowerCase() === String(pUnitRaw).toLowerCase()) ||
+              (l.unit && p.unit && String(l.unit).toLowerCase() === String(p.unit).toLowerCase()) ||
+              (l.name && p.unit && String(l.name).toLowerCase() === String(p.unit).toLowerCase())
+            );
+
+            let unitName = "";
+            if (foundLogement) {
+              unitName = formatUnitDisplay(foundLogement, idx + 1, foundLogement.type || "Studio");
+            } else if (p.unit && !isUUID(p.unit)) {
+              unitName = formatUnitDisplay(p.unit, idx + 1);
+            } else {
+              unitName = `Logement ${idx + 1}`;
+            }
+
+            const propName = p.property || p.bien || foundLogement?.property || myBiens[0]?.name || "";
+            const tenantName = p.tenant || p.locataire || foundLogement?.tenant || "Locataire";
+
+            const rawType = (p.type || p.objet || p.typePaiement || p.motif || "").toLowerCase();
+            const rawPer = (p.period_month || "").toLowerCase();
+            const isCaution = rawType.includes("caution") || rawPer.includes("caution");
+            const isAvance = rawType.includes("avance") || rawPer.includes("avance");
+            const displayType = isCaution ? "Caution" : isAvance ? "Avance Loyer" : "Loyer";
+
+            return {
+              unit: unitName,
+              property: propName,
+              tenant: tenantName,
+              type: displayType,
+              period: p.period || p.period_month || payoutPeriod,
+              amount: Number(p.amount) || 0,
+            };
+          });
+        };
+
+        if (myRev.length > 0) {
+          setPayouts(
+            myRev.map((r, idx) => {
+              const period = r.period || r.period_month || "Période courante";
+              const rawGross = Number(r.collected) || Number(r.gross_amount) || 0;
+              const rawNet = Number(r.amount) || Number(r.net_amount) || 0;
+              const rawComm = Number(r.commission) || Number(r.agency_commission) || 0;
+
+              let collectedAmt = rawGross > 0 ? rawGross : (rawNet + rawComm);
+              let netAmt = rawNet > 0 ? rawNet : collectedAmt;
+              let commissionAmt = rawComm;
+
+              if (commissionAmt === 0 && validRate > 0 && collectedAmt > netAmt) {
+                commissionAmt = collectedAmt - netAmt;
+              } else if (collectedAmt === netAmt && validRate > 0 && commissionAmt === 0) {
+                commissionAmt = Math.round(collectedAmt * (validRate / 100));
+                netAmt = collectedAmt - commissionAmt;
+              }
+
+              const paymentList = buildPaymentsForPayout(
+                {
+                  ...r,
+                  period,
+                  collected: collectedAmt,
+                  amount: netAmt,
+                  commission: commissionAmt,
+                },
+                idx
+              );
+
+              // Re-synchronize totals with payment items if available
+              const itemsTotal = paymentList.reduce((sum: number, item: any) => sum + (Number(item.amount) || 0), 0);
+              if (itemsTotal > 0 && (collectedAmt <= 0 || (collectedAmt === netAmt && validRate === 0 && collectedAmt !== itemsTotal))) {
+                collectedAmt = itemsTotal;
+                netAmt = validRate === 0 ? collectedAmt : Math.round(collectedAmt * ((100 - validRate) / 100));
+                commissionAmt = Math.max(0, collectedAmt - netAmt);
+              }
+
+              return {
+                id: r.id,
+                period: period,
+                date: r.date || (r.created_at ? r.created_at.slice(0, 10) : "2026-10-01"),
+                collected: collectedAmt,
+                amount: netAmt,
+                commission: commissionAmt,
+                status: r.status || "EFFECTUÉ",
+                method: r.method || r.payment_method || "VIREMENT BANCAIRE",
+                reference: r.reference || (r.id ? `VIR-${String(r.id).replace(/\D/g, '').slice(0, 6) || '2026'}` : "VIR-REF"),
+                gerant: r.gerant || "Direction GESTIMMO",
+                payments: paymentList,
+              };
+            })
+          );
+        } else if (myPaiements.length > 0) {
+          const grossRevenue = myPaiements.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          const commissionAmt = validRate > 0 ? Math.round(grossRevenue * (validRate / 100)) : 0;
+          const netAmt = grossRevenue - commissionAmt;
+          const paymentList = buildPaymentsForPayout({ period: "Période courante", collected: grossRevenue, amount: netAmt, commission: commissionAmt }, 0);
+
+          setPayouts([
+            {
+              id: "REV-ACTIF-1",
+              period: "Période courante",
+              date: new Date().toISOString().slice(0, 10),
+              collected: grossRevenue,
+              amount: netAmt,
+              commission: commissionAmt,
+              status: "EFFECTUÉ",
+              method: "VIREMENT BANCAIRE",
+              reference: "VIR-2026-AUTO",
+              gerant: "Direction GESTIMMO",
+              payments: paymentList,
+            },
+          ]);
+        } else {
+          setPayouts([]);
+        }
+      }
+    };
+
+    loadData();
+  }, []);
 
   const handleDownloadPdf = async (payout: any) => {
     setIsDownloadingId(payout.id);
     try {
       const html2pdf = (await import("html2pdf.js")).default;
-      const ownerName = currentOwner?.name || "Propriétaire";
-      const ownerCode = currentOwner?.code || "PR-100";
-      const netAmt = Number(payout.amount) || 0;
-      const rawCollected = Number(payout.collected) || netAmt;
-      const collectedAmt = (payout.commission === 0 || rawCollected <= netAmt) ? netAmt : rawCollected;
-      const commissionAmt = Math.max(0, collectedAmt - netAmt);
+      const ownerName = currentOwner?.name || currentOwner?.full_name || "Propriétaire";
+      const ownerCode = currentOwner?.code || (currentOwner?.id ? `PR-${currentOwner.id.slice(0, 6)}` : "PR-100");
 
       const paymentsList = payout.payments || [];
       const rentSum = paymentsList
@@ -240,6 +366,12 @@ export default function ProprietaireRelevesPage() {
       const cautionSum = paymentsList
         .filter((p: any) => p.type?.toLowerCase().includes("caution"))
         .reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
+
+      const itemsTotal = rentSum + cautionSum;
+      const collectedAmt = itemsTotal > 0 ? itemsTotal : (Number(payout.collected) || Number(payout.amount) || 0);
+      const netAmt = Number(payout.amount) || collectedAmt;
+      const commissionAmt = Number(payout.commission) || Math.max(0, collectedAmt - netAmt);
+      const effectiveRate = collectedAmt > 0 && commissionAmt > 0 ? Math.round((commissionAmt / collectedAmt) * 100) : 0;
 
       const paymentRowsHtml = paymentsList.map((item: any) => {
         const isCaution = item.type?.toLowerCase().includes("caution");
@@ -252,7 +384,7 @@ export default function ProprietaireRelevesPage() {
           <tr style="border-bottom: 1px solid #e2e8f0;">
             <td style="padding: 10px 12px; font-weight: 700; color: #0f172a; font-size: 13px;">
               ${item.unit}
-              ${item.property ? `<span style="display:block; font-size:11px; font-weight:normal; color:#64748b;">${item.property}</span>` : ''}
+              ${item.property ? `<span style="display:block; font-size:11px; font-weight:normal; color:#64748b; margin-top: 2px;">${item.property}</span>` : ''}
             </td>
             <td style="padding: 10px 12px; color: #334155; font-size: 13px; font-weight: 500;">${item.tenant}</td>
             <td style="padding: 10px 12px;">
@@ -265,6 +397,15 @@ export default function ProprietaireRelevesPage() {
           </tr>
         `;
       }).join('');
+
+      const cleanFilenameOwner = (ownerName || "Proprietaire")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9_-]/g, "_");
+      const cleanFilenamePeriod = (payout.period || "Releve")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9_-]/g, "_");
 
       const element = document.createElement("div");
       element.innerHTML = `
@@ -294,7 +435,7 @@ export default function ProprietaireRelevesPage() {
               <p style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: 700; margin: 0 0 4px 0; letter-spacing: 0.05em;">Informations Reversement</p>
               <p style="font-size: 12px; color: #475569; margin: 0;">Période : <strong style="color: #0f172a;">${payout.period}</strong></p>
               <p style="font-size: 12px; color: #475569; margin: 3px 0 0 0;">Date de virement : <strong style="color: #0f172a;">${payout.date}</strong></p>
-              <p style="font-size: 12px; color: #475569; margin: 3px 0 0 0;">Mode : <strong style="color: #0f172a;">${payout.method || "Virement Bancaire"}</strong></p>
+              <p style="font-size: 12px; color: #475569; margin: 3px 0 0 0;">Mode : <strong style="color: #0f172a;">${payout.method || "VIREMENT BANCAIRE"}</strong></p>
               ${payout.reference ? `<p style="font-size: 12px; color: #2563eb; margin: 3px 0 0 0;">Réf Transaction : <strong>${payout.reference}</strong></p>` : ''}
             </div>
           </div>
@@ -324,12 +465,19 @@ export default function ProprietaireRelevesPage() {
             <tbody>
               <tr style="border-bottom: 1px solid #e2e8f0; background: #ffffff;">
                 <td style="padding: 11px 14px; color: #475569; font-weight: 500;">Total Loyers Encaissés :</td>
-                <td style="padding: 11px 14px; text-align: right; font-weight: 700; color: #0f172a;">${formatFCFA(rentSum || collectedAmt / 2)}</td>
+                <td style="padding: 11px 14px; text-align: right; font-weight: 700; color: #0f172a;">${formatFCFA(rentSum)}</td>
               </tr>
+              ${cautionSum > 0 ? `
               <tr style="border-bottom: 1px solid #e2e8f0; background: #ffffff;">
                 <td style="padding: 11px 14px; color: #475569; font-weight: 500;">Total Cautions Reversées :</td>
-                <td style="padding: 11px 14px; text-align: right; font-weight: 700; color: #6b21a8;">${formatFCFA(cautionSum || collectedAmt / 2)}</td>
+                <td style="padding: 11px 14px; text-align: right; font-weight: 700; color: #6b21a8;">${formatFCFA(cautionSum)}</td>
               </tr>
+              ` : `
+              <tr style="border-bottom: 1px solid #e2e8f0; background: #ffffff;">
+                <td style="padding: 11px 14px; color: #475569; font-weight: 500;">Total Cautions Reversées :</td>
+                <td style="padding: 11px 14px; text-align: right; font-weight: 700; color: #64748b;">0 F CFA</td>
+              </tr>
+              `}
               <tr style="border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
                 <td style="padding: 11px 14px; color: #334155; font-weight: 700;">Total Brut Encaissé &amp; Reversé :</td>
                 <td style="padding: 11px 14px; text-align: right; font-weight: 800; color: #0f172a;">${formatFCFA(collectedAmt)}</td>
@@ -337,7 +485,7 @@ export default function ProprietaireRelevesPage() {
               <tr style="border-bottom: 1px solid #e2e8f0; background: #ffffff;">
                 <td style="padding: 11px 14px; color: #64748b; font-weight: 500;">Frais et Honoraires de Gérance GESTIMMO :</td>
                 <td style="padding: 11px 14px; text-align: right; font-weight: 700; color: ${commissionAmt > 0 ? '#dc2626' : '#16a34a'};">
-                  ${commissionAmt > 0 ? `-${formatFCFA(commissionAmt)}` : "0 F CFA (0%)"}
+                  ${commissionAmt > 0 ? `-${formatFCFA(commissionAmt)}${effectiveRate > 0 ? ` (${effectiveRate}%)` : ''}` : "0 F CFA (0%)"}
                 </td>
               </tr>
             </tbody>
@@ -362,7 +510,7 @@ export default function ProprietaireRelevesPage() {
 
       const options: any = {
         margin: 8,
-        filename: `Releve_Gerance_${ownerName.replace(/\s+/g, '_')}_${payout.period.replace(/\s+/g, '_')}.pdf`,
+        filename: `Releve_Gerance_${cleanFilenameOwner}_${cleanFilenamePeriod}.pdf`,
         image: { type: "jpeg", quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
@@ -503,7 +651,7 @@ export default function ProprietaireRelevesPage() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm bg-gray-50 p-4 rounded-xl border border-gray-100">
                 <div>
                   <span className="text-xs font-medium text-gray-500 block">Propriétaire</span>
-                  <span className="font-semibold text-gray-900 mt-0.5 block truncate">{currentOwner?.name || "Propriétaire"}</span>
+                  <span className="font-semibold text-gray-900 mt-0.5 block truncate">{currentOwner?.name || currentOwner?.full_name || "Propriétaire"}</span>
                 </div>
                 <div>
                   <span className="text-xs font-medium text-gray-500 block">Période Concernée</span>
@@ -562,7 +710,7 @@ export default function ProprietaireRelevesPage() {
                             return (
                               <tr key={idx} className="hover:bg-gray-50/60 transition-colors">
                                 <td className="py-3 px-3 font-semibold text-gray-900">
-                                  {formatUnitDisplay(item.unit, idx + 1)}
+                                  {item.unit}
                                   {item.property && <span className="block text-[11px] font-normal text-gray-500">{item.property}</span>}
                                 </td>
                                 <td className="py-3 px-3 text-gray-700 font-medium">
@@ -610,28 +758,32 @@ export default function ProprietaireRelevesPage() {
                       .filter((p: any) => p.type?.toLowerCase().includes("caution"))
                       .reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
                     
-                    const gross = Number(selectedPayoutDetails.collected || selectedPayoutDetails.amount);
-                    const net = Number(selectedPayoutDetails.amount);
-                    const fee = Math.max(0, gross - net);
+                    const itemsTotal = rentSum + cautionSum;
+                    const gross = itemsTotal > 0 ? itemsTotal : Number(selectedPayoutDetails.collected || selectedPayoutDetails.amount || 0);
+                    const net = Number(selectedPayoutDetails.amount) || gross;
+                    const fee = Number(selectedPayoutDetails.commission) || Math.max(0, gross - net);
+                    const feeRate = gross > 0 && fee > 0 ? Math.round((fee / gross) * 100) : 0;
 
                     return (
                       <>
                         <div className="flex justify-between items-center text-gray-700">
                           <span>Total Loyers Encaissés :</span>
-                          <span className="font-semibold text-gray-900">{formatFCFA(rentSum || gross / 2)}</span>
+                          <span className="font-semibold text-gray-900">{formatFCFA(rentSum)}</span>
                         </div>
                         <div className="flex justify-between items-center text-gray-700">
                           <span>Total Cautions Reversées :</span>
-                          <span className="font-semibold text-purple-700">{formatFCFA(cautionSum || gross / 2)}</span>
+                          <span className={`font-semibold ${cautionSum > 0 ? "text-purple-700" : "text-gray-500"}`}>
+                            {formatFCFA(cautionSum)}
+                          </span>
                         </div>
                         <div className="flex justify-between items-center text-gray-700 pt-1.5 border-t border-gray-100 font-medium">
-                          <span>Total Brut Encaissé & Reversé :</span>
+                          <span>Total Brut Encaissé &amp; Reversé :</span>
                           <span className="font-semibold text-gray-900">{formatFCFA(gross)}</span>
                         </div>
                         <div className="flex justify-between items-center text-gray-700">
                           <span>Frais de Gérance Prélevés :</span>
                           <span className={`font-semibold ${fee > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                            {fee > 0 ? `-${formatFCFA(fee)}` : "0 F CFA (0%)"}
+                            {fee > 0 ? `-${formatFCFA(fee)}${feeRate > 0 ? ` (${feeRate}%)` : ""}` : "0 F CFA (0%)"}
                           </span>
                         </div>
                         <div className="flex justify-between items-center pt-2 border-t border-gray-200 font-bold text-gray-900">

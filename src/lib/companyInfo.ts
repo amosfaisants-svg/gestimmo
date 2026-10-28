@@ -29,7 +29,7 @@ export function getStoredCompanyInfo(): CompanyInfo {
       return {
         ...defaultCompanyInfo,
         ...parsed,
-        logo: parsed.logo || logo || "",
+        logo: typeof parsed.logo === "string" ? parsed.logo : (logo || ""),
       };
     }
     if (logo) {
@@ -41,19 +41,59 @@ export function getStoredCompanyInfo(): CompanyInfo {
   return defaultCompanyInfo;
 }
 
+export async function fetchCompanyFromSupabase(): Promise<CompanyInfo | null> {
+  if (!isSupabaseConfigured() || typeof window === "undefined") return null;
+  try {
+    const { data, error } = await (supabase.from("companies") as any)
+      .select("*")
+      .eq("id", DEFAULT_COMPANY_ID)
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    const current = getStoredCompanyInfo();
+    const merged: CompanyInfo = {
+      name: data.name || current.name || defaultCompanyInfo.name,
+      rccm: current.rccm || defaultCompanyInfo.rccm,
+      address: data.address || current.address || defaultCompanyInfo.address,
+      phone: data.phone || current.phone || defaultCompanyInfo.phone,
+      email: data.email || current.email || defaultCompanyInfo.email,
+      logo: current.logo || data.logo_url || "",
+    };
+
+    localStorage.setItem("gestimmo_company_info", JSON.stringify(merged));
+    if (merged.logo) {
+      localStorage.setItem("gestimmo_company_logo", merged.logo);
+    }
+    window.dispatchEvent(new Event("storage"));
+    window.dispatchEvent(new CustomEvent("gestimmo_company_updated", { detail: merged }));
+    return merged;
+  } catch (err) {
+    console.warn("Erreur chargement entreprise depuis Supabase:", err);
+    return null;
+  }
+}
+
 export function saveStoredCompanyInfo(info: Partial<CompanyInfo>): CompanyInfo {
   if (typeof window === "undefined") return defaultCompanyInfo;
   const current = getStoredCompanyInfo();
   const updated: CompanyInfo = {
     ...current,
     ...info,
-    name: info.name !== undefined ? info.name.trim() : current.name,
+    name: info.name !== undefined ? String(info.name).trim() : current.name,
+    rccm: info.rccm !== undefined ? String(info.rccm).trim() : current.rccm,
+    address: info.address !== undefined ? String(info.address).trim() : current.address,
+    phone: info.phone !== undefined ? String(info.phone).trim() : current.phone,
+    email: info.email !== undefined ? String(info.email).trim() : current.email,
+    logo: info.logo !== undefined ? String(info.logo) : current.logo,
   };
 
   try {
     localStorage.setItem("gestimmo_company_info", JSON.stringify(updated));
     if (updated.logo) {
       localStorage.setItem("gestimmo_company_logo", updated.logo);
+    } else {
+      localStorage.removeItem("gestimmo_company_logo");
     }
     window.dispatchEvent(new Event("storage"));
     window.dispatchEvent(new CustomEvent("gestimmo_company_updated", { detail: updated }));
@@ -72,6 +112,7 @@ export function saveStoredCompanyInfo(info: Partial<CompanyInfo>): CompanyInfo {
             address: updated.address || null,
             phone: updated.phone || null,
             email: updated.email || null,
+            logo_url: updated.logo ? (updated.logo.length < 500000 ? updated.logo : null) : null,
           },
           { onConflict: "id" }
         )

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/Badge";
-import { Download, FileText, Calendar, ShieldCheck, Loader2, Clock, UserMinus, X, AlertTriangle } from "lucide-react";
+import { Download, FileText, Calendar, ShieldCheck, Loader2, Clock, UserMinus, X, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { checkAndAutoRenewLeases } from "@/lib/leaseRenewal";
 import { loadAllDataFromDatabase } from "@/lib/dataService";
 import { formatUnitDisplay, getLeaseDisplayCode } from "@/lib/utils";
@@ -301,6 +301,9 @@ export default function LocataireBauxPage() {
             <h3 style="font-size: 14px; font-weight: 700; color: #0f172a; margin: 0 0 12px 0; text-transform: uppercase;">2. Durée & Période</h3>
             <p style="font-size: 13px; margin: 4px 0;"><strong>Date de prise d'effet :</strong> ${startDate}</p>
             <p style="font-size: 13px; margin: 4px 0;"><strong>Date d'échéance :</strong> ${endDate}</p>
+            <p style="font-size: 12px; color: #475569; margin: 10px 0 0 0; padding-top: 10px; border-top: 1px solid #e2e8f0; line-height: 1.45;">
+              En l'absence de résiliation à la date d'échéance, ce bail est automatiquement reconduit de 1 an chaque année.
+            </p>
           </div>
 
           <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 25px;">
@@ -437,15 +440,24 @@ export default function LocataireBauxPage() {
             <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4 flex items-center">
               <Calendar className="w-4 h-4 mr-2 text-primary" /> Période de validité
             </h3>
-            <div className="bg-gray-50 rounded-xl p-4 border border-app-border flex justify-between items-center">
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Date d'effet</p>
-                <p className="text-sm font-bold text-gray-900">{startDate}</p>
+            <div className="bg-gray-50 rounded-xl p-4 border border-app-border space-y-3">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Date d'effet</p>
+                  <p className="text-sm font-bold text-gray-900">{startDate}</p>
+                </div>
+                <div className="w-8 h-[1px] bg-gray-300"></div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-500 mb-1">Date de fin</p>
+                  <p className="text-sm font-bold text-gray-900">{endDate}</p>
+                </div>
               </div>
-              <div className="w-8 h-[1px] bg-gray-300"></div>
-              <div className="text-right">
-                <p className="text-xs text-gray-500 mb-1">Date de fin</p>
-                <p className="text-sm font-bold text-gray-900">{endDate}</p>
+
+              <div className="pt-3 border-t border-app-border flex items-start gap-2 text-xs text-gray-600">
+                <CheckCircle2 className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                <span>
+                  En l'absence de résiliation à la date d'échéance, ce bail est automatiquement reconduit de 1 an chaque année.
+                </span>
               </div>
             </div>
           </div>

@@ -38,7 +38,7 @@ function LocatairesPageInner() {
   const [statusFilter, setStatusFilter] = useState("Tous statuts");
   const [ownerFilter, setOwnerFilter] = useState("Tous les propriétaires");
   const [propertyFilter, setPropertyFilter] = useState("Tous les biens");
-  const [sortFilter, setSortFilter] = useState("Ordre d'enregistrement");
+  const [sortFilter, setSortFilter] = useState("Plus récents");
   const [owners, setOwners] = useState<any[]>([]);
   const [biens, setBiens] = useState<any[]>([]);
 
@@ -430,8 +430,15 @@ function LocatairesPageInner() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Locataires</h1>
-          <p className="text-sm text-gray-500 mt-1">Gérez vos locataires et le suivi de leurs paiements.</p>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-900">Locataires</h1>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary-50 text-primary border border-primary/20 shadow-xs">
+              {sortedTenants.length !== tenants.length
+                ? `${sortedTenants.length} sur ${tenants.length} locataire${tenants.length > 1 ? "s" : ""}`
+                : `${tenants.length} locataire${tenants.length > 1 ? "s" : ""}`}
+            </span>
+          </div>
+          <p className="text-sm text-gray-500 mt-1">Gérez vos {tenants.length > 0 ? `${tenants.length} ` : ""}locataires et le suivi de leurs paiements.</p>
         </div>
         <div className="flex items-center gap-3">
           {selectedTenantIds.length > 0 && can("locataires", "delete") && (
@@ -588,7 +595,7 @@ function LocatairesPageInner() {
                   />
                 </th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">N° Enregistrement</th>
-                <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium">Locataire</th>
+                <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium">Locataire ({sortedTenants.length})</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium">Contact</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium">Logement actuel</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Loyer global</th>

@@ -11,12 +11,19 @@ export default function LocataireLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+  const [isAuthorized, setIsAuthorized] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const session = getPortalSession('LOCATAIRE');
+      return !!(session && session.user);
+    }
+    return true;
+  });
 
   useEffect(() => {
     const session = getPortalSession('LOCATAIRE');
 
     if (!session || !session.user) {
+      setIsAuthorized(false);
       router.replace("/connexion");
       return;
     }
@@ -24,10 +31,13 @@ export default function LocataireLayout({
     setIsAuthorized(true);
   }, [router]);
 
-  if (isAuthorized === null) {
+  if (!isAuthorized) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-app-bg text-gray-500 font-sans">
-        Chargement de l'espace locataire...
+        <div className="flex items-center gap-3">
+          <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm font-medium">Connexion en cours...</span>
+        </div>
       </div>
     );
   }

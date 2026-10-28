@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { ArrowLeft, Upload, FileText, Download, CheckCircle } from "lucide-react";
 import Link from "next/link";
 import { generateContratBail } from "@/lib/pdfGenerator";
-import { getPdfTemplate } from "@/lib/storage";
+import { getPdfTemplate, getGenericTemplate, getOrGenerateContratTemplate } from "@/lib/storage";
 
 export default function GenererContratPage({ params }: { params: { id: string } }) {
   const [tenant, setTenant] = useState<any>(null);
@@ -102,14 +102,25 @@ export default function GenererContratPage({ params }: { params: { id: string } 
   };
 
   const handleGenerate = async () => {
-    let base64Pdf = await getPdfTemplate();
-    if (!base64Pdf) {
-      base64Pdf = localStorage.getItem("gestimmo_modele_contrat");
+    let base64Pdf = null;
+    if (ownerName) {
+      try {
+        const storedOwners = localStorage.getItem("gestimmo_proprietaires");
+        if (storedOwners) {
+          const owners = JSON.parse(storedOwners);
+          const o = owners.find((x: any) => 
+            (x.name && x.name.trim().toLowerCase() === ownerName.trim().toLowerCase()) ||
+            (x.full_name && x.full_name.trim().toLowerCase() === ownerName.trim().toLowerCase()) ||
+            (x.id && x.id === ownerName)
+          );
+          if (o?.templates?.contratFileKey) {
+            base64Pdf = await getGenericTemplate(o.templates.contratFileKey);
+          }
+        }
+      } catch (e) {}
     }
-    
     if (!base64Pdf) {
-      alert("Aucun modèle de contrat n'est configuré. Veuillez en importer un depuis les paramètres.");
-      return;
+      base64Pdf = await getOrGenerateContratTemplate(ownerName);
     }
 
     setIsGenerating(true);

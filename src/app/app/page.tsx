@@ -32,7 +32,7 @@ import {
 import Link from "next/link";
 import { usePermissions } from "@/hooks/usePermissions";
 import { loadAllDataFromDatabase, deleteIncident, updateIncident } from "@/lib/dataService";
-import { formatUnitDisplay, isUUID, cn, syncPaymentsWithLeases, getIncidentDisplayCode, checkTenantHasImportedContract } from "@/lib/utils";
+import { formatUnitDisplay, isUUID, cn, syncPaymentsWithLeases, sortPaymentsDesc, comparePaymentsDesc, formatPaymentDateDisplay, getIncidentDisplayCode, checkTenantHasImportedContract } from "@/lib/utils";
 import { getPortalSession } from "@/lib/authSession";
 import { isImageFile, getFileSource, compressImageFile } from "@/lib/imageCompressor";
 import { IncidentDetailModal } from "@/components/ui/IncidentDetailModal";
@@ -172,6 +172,7 @@ export default function Dashboard() {
   const [selectedEntreprise, setSelectedEntreprise] = useState("Toutes les entreprises");
   const [selectedBien, setSelectedBien] = useState("Tous les biens");
   const [loyersStatusFilter, setLoyersStatusFilter] = useState("Tous");
+  const [loyersSortOrder, setLoyersSortOrder] = useState<"recent" | "ancien">("recent");
   const [reversementFilter, setReversementFilter] = useState("Tous");
 
   const isSamePeriod = (pPeriod: string, targetYYYYMM: string) => {
@@ -212,6 +213,34 @@ export default function Dashboard() {
       }
     }
 
+    // 1. Instant local render (0ms) from cache to eliminate loading delay
+    try {
+      const l_baux = JSON.parse(localStorage.getItem("gestimmo_baux") || "[]");
+      const l_paiements = JSON.parse(localStorage.getItem("gestimmo_paiements") || "[]");
+      const l_logements = JSON.parse(localStorage.getItem("gestimmo_logements") || "[]");
+      const l_reversements = JSON.parse(localStorage.getItem("gestimmo_reversements") || "[]");
+      const l_proprietaires = JSON.parse(localStorage.getItem("gestimmo_proprietaires") || "[]");
+      const l_biens = JSON.parse(localStorage.getItem("gestimmo_biens") || "[]");
+      const l_locataires = JSON.parse(localStorage.getItem("gestimmo_locataires") || "[]");
+      const l_incidents = JSON.parse(localStorage.getItem("gestimmo_incidents") || "[]");
+      const l_equipe = JSON.parse(localStorage.getItem("gestimmo_equipe") || "[]");
+
+      if (l_baux.length > 0 || l_paiements.length > 0 || l_logements.length > 0) {
+        setBaux(l_baux);
+        setPaiements(syncPaymentsWithLeases(l_paiements, l_baux));
+        setLogements(l_logements);
+        setReversements(l_reversements);
+        setProprietaires(l_proprietaires);
+        setBiens(l_biens);
+        setLocataires(l_locataires);
+        setIncidents(l_incidents);
+        setManagers(l_equipe);
+      }
+    } catch (e) {
+      console.warn("Instant cache load error:", e);
+    }
+
+    // 2. Background revalidation from Supabase
     const initData = async () => {
       const dbState = await loadAllDataFromDatabase();
       if (dbState) {
@@ -1305,7 +1334,13 @@ export default function Dashboard() {
 
         {incidents.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {incidents.map((inc) => {
+            {[...incidents]
+              .sort((a: any, b: any) => {
+                const timeA = a.createdAt || a.created_at ? new Date(a.createdAt || a.created_at).getTime() : 0;
+                const timeB = b.createdAt || b.created_at ? new Date(b.createdAt || b.created_at).getTime() : 0;
+                return timeB - timeA;
+              })
+              .map((inc) => {
               const displayTenant = inc.tenant && inc.tenant !== "Inconnu" ? inc.tenant : "Locataire Inconnu";
               const tenantInitials = (displayTenant || "L").split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
               const matchedLoc = locataires.find((l: any) => (l.name || "").trim().toLowerCase() === (inc.tenant || "").trim().toLowerCase());
@@ -1531,6 +1566,18 @@ export default function Dashboard() {
                     ))}
                   </select>
                 </div>
+
+                <div className="flex items-center gap-1.5 bg-gray-50 border border-app-border rounded-lg px-2.5 py-1.5">
+                  <span className="text-xs font-semibold text-gray-500">Tri :</span>
+                  <select 
+                    value={loyersSortOrder}
+                    onChange={(e) => setLoyersSortOrder(e.target.value as "recent" | "ancien")}
+                    className="bg-transparent text-xs font-semibold text-gray-900 outline-none cursor-pointer"
+                  >
+                    <option value="recent">Du plus récent au plus ancien</option>
+                    <option value="ancien">Du plus ancien au plus récent</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -1574,19 +1621,37 @@ export default function Dashboard() {
                   <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium">Locataire</th>
                   <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Appt.</th>
                   <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Montant</th>
-                  <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Payé jusqu'à</th>
+                  <th 
+                    onClick={() => setLoyersSortOrder(loyersSortOrder === "recent" ? "ancien" : "recent")}
+                    className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center cursor-pointer hover:text-gray-900 select-none group"
+                    title="Cliquer pour inverser le tri"
+                  >
+                    <div className="inline-flex items-center gap-1.5 justify-center">
+                      <span>Date d'encaissement</span>
+                      <span className="text-xs font-bold text-primary group-hover:scale-110 transition-transform">
+                        {loyersSortOrder === "recent" ? "↓" : "↑"}
+                      </span>
+                    </div>
+                  </th>
                   <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Statut</th>
                   <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-app-border">
                 {(() => {
-                  const filteredPaymentsTable = filteredPaiementsPeriod.filter((p: any) => {
+                  const basePayments = filteredPaiementsPeriod.filter((p: any) => {
                     if (loyersStatusFilter === "Tous") return true;
                     if (loyersStatusFilter === "Payés") return p.status === "PAYÉ" || p.status === "VALIDÉ";
                     if (loyersStatusFilter === "En retard") return p.status === "EN RETARD";
                     if (loyersStatusFilter === "Impayés") return p.status === "IMPAYÉ" || p.status === "REJETÉ" || p.status === "EN ATTENTE";
                     return true;
+                  });
+
+                  const filteredPaymentsTable = [...basePayments].sort((a, b) => {
+                    if (loyersSortOrder === "ancien") {
+                      return comparePaymentsDesc(b, a);
+                    }
+                    return comparePaymentsDesc(a, b);
                   });
 
                   if (filteredPaymentsTable.length === 0) {
@@ -1617,8 +1682,13 @@ export default function Dashboard() {
                         <td className="px-4 py-3.5 md:px-6 md:py-4 whitespace-nowrap text-sm font-semibold text-gray-900 text-center">
                           {formatFCFA(payment.amount)}
                         </td>
-                        <td className="px-4 py-3.5 md:px-6 md:py-4 whitespace-nowrap text-sm text-gray-500 text-center">
-                          {payment.period || "-"}
+                        <td className="px-4 py-3.5 md:px-6 md:py-4 whitespace-nowrap text-center">
+                          <div className="text-sm font-semibold text-gray-900">
+                            {formatPaymentDateDisplay(payment.payment_date || payment.date || payment.created_at)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            Période : {payment.period || "-"}
+                          </div>
                         </td>
                         <td className="px-4 py-3.5 md:px-6 md:py-4 whitespace-nowrap text-center">
                           <Badge dot variant={getStatusBadge(payment.status) as any}>

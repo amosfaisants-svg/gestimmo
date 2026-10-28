@@ -151,10 +151,11 @@ export const getIncidentDisplayCode = (incidentOrId?: any): string => {
 };
 
 export const syncPaymentsWithLeases = (paymentsList: any[], leasesList: any[]): any[] => {
-  if (!Array.isArray(paymentsList) || paymentsList.length === 0) return paymentsList;
+  if (!Array.isArray(paymentsList)) paymentsList = [];
   if (!Array.isArray(leasesList) || leasesList.length === 0) return paymentsList;
 
-  return paymentsList.map((p) => {
+  // 1. Synchroniser les paiements existants avec les détails du bail
+  const updatedPayments = paymentsList.map((p) => {
     if (!p) return p;
     
     const pTenant = (p.tenant || "").toString().trim().toLowerCase();
@@ -206,6 +207,205 @@ export const syncPaymentsWithLeases = (paymentsList: any[], leasesList: any[]): 
 
     return p;
   });
+
+  // 2. Garantir que la caution / dépôt de garantie prévue par un bail actif figure bien dans les encaissements
+  const resultPayments = [...updatedPayments];
+  leasesList.forEach((lease) => {
+    if (!lease || (lease.status && lease.status.toString().toUpperCase() !== "ACTIF")) return;
+
+    const lTenant = (lease.tenant || "").toString().trim().toLowerCase();
+    const lUnit = (lease.unit || "").toString().trim().toLowerCase();
+    const lId = (lease.id || "").toString().trim().toLowerCase();
+    if (!lTenant && !lUnit) return;
+
+    const monthlyTotal = (Number(lease.rent) || 0) + (Number(lease.charges) || 0);
+    const cautionMonths = Number(lease.cautionMonths || lease.caution_months) || 
+      (Number(lease.deposit || lease.deposit_amount) > 0 && monthlyTotal > 0 ? Math.round(Number(lease.deposit || lease.deposit_amount) / monthlyTotal) : 0);
+
+    if (cautionMonths > 0 && monthlyTotal > 0) {
+      const hasCaution = resultPayments.some((p) => {
+        if (!p) return false;
+        const pTenant = (p.tenant || "").toString().trim().toLowerCase();
+        const pUnit = (p.unit || "").toString().trim().toLowerCase();
+        const pLeaseId = (p.leaseId || p.lease_id || "").toString().trim().toLowerCase();
+        const pPeriod = (p.period || p.period_month || p.type || "").toString().toLowerCase();
+
+        const matchesLease = (pLeaseId && lId && pLeaseId === lId) ||
+          (pTenant && lTenant && pTenant === lTenant) ||
+          (pUnit && lUnit && (pUnit === lUnit || pUnit.includes(lUnit) || lUnit.includes(pUnit)));
+
+        return matchesLease && (pPeriod.includes("caution") || pPeriod.includes("dépôt") || pPeriod.includes("depot"));
+      });
+
+      if (!hasCaution) {
+        const cautionAmt = cautionMonths * monthlyTotal;
+        const fallbackDate = lease.start || lease.startDate || lease.start_date || new Date().toISOString().split("T")[0];
+        resultPayments.push({
+          id: `P-CAU-SYNC-${lease.id ? String(lease.id).slice(0, 8) : Math.floor(1000 + Math.random() * 9000)}`,
+          code: `REC-CAU-${lease.id ? String(lease.id).slice(0, 6).toUpperCase() : "SYNC"}`,
+          leaseId: lease.id,
+          lease_id: lease.id,
+          tenant: lease.tenant,
+          tenantId: lease.tenantId || lease.tenant_id,
+          unit: lease.unit,
+          unitId: lease.unitId || lease.unit_id,
+          property: lease.property,
+          propertyId: lease.propertyId || lease.property_id,
+          amount: cautionAmt,
+          date: fallbackDate,
+          period: `Caution (${cautionMonths} mois)`,
+          period_month: `Caution (${cautionMonths} mois)`,
+          method: "Espèces",
+          status: "PAYÉ",
+          receiptNumber: `REC-CAU-${lease.id ? String(lease.id).slice(0, 6).toUpperCase() : "SYNC"}`,
+        });
+      }
+    }
+  });
+
+  return sortPaymentsDesc(resultPayments);
+};
+
+export const parsePaymentDateToTimestamp = (raw?: any): number => {
+  if (!raw || raw === "-" || raw === "—") return 0;
+  if (typeof raw === "number") return raw;
+  if (raw instanceof Date) return raw.getTime();
+  const str = String(raw).trim();
+
+  const isoTime = Date.parse(str);
+  if (!isNaN(isoTime)) return isoTime;
+
+  const slashMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (slashMatch) {
+    const d = parseInt(slashMatch[1], 10);
+    const m = parseInt(slashMatch[2], 10) - 1;
+    const y = parseInt(slashMatch[3], 10);
+    return new Date(y, m, d).getTime();
+  }
+
+  const clean = str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[,.]/g, "");
+  const parts = clean.split(/\s+/);
+
+  const MONTHS_NORM: Record<string, number> = {
+    janv: 0, janvier: 0,
+    fevr: 1, fev: 1, fevrier: 1,
+    mars: 2,
+    avr: 3, avril: 3,
+    mai: 4,
+    juin: 5,
+    juil: 6, juillet: 6,
+    aout: 7,
+    sept: 8, septembre: 8,
+    oct: 9, octobre: 9,
+    nov: 10, novembre: 10,
+    dec: 11, decembre: 11,
+  };
+
+  if (parts.length >= 3) {
+    const day = parseInt(parts[0], 10);
+    const mKey = parts[1];
+    const year = parseInt(parts[2], 10);
+    if (!isNaN(day) && MONTHS_NORM[mKey] !== undefined && !isNaN(year)) {
+      return new Date(year, MONTHS_NORM[mKey], day).getTime();
+    }
+  }
+
+  if (parts.length === 2) {
+    const mKey = parts[0];
+    const year = parseInt(parts[1], 10);
+    if (MONTHS_NORM[mKey] !== undefined && !isNaN(year)) {
+      return new Date(year, MONTHS_NORM[mKey], 1).getTime();
+    }
+  }
+
+  return 0;
+};
+
+export const formatPaymentDateDisplay = (raw?: any): string => {
+  if (!raw || raw === "-" || raw === "—") return "-";
+  const ts = parsePaymentDateToTimestamp(raw);
+  if (!ts) return String(raw);
+  const d = new Date(ts);
+  const formatted = d.toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+};
+
+export const parsePeriodScore = (raw?: any): number => {
+  if (!raw) return 0;
+  const s = String(raw).trim().toLowerCase();
+  if (s.includes("caution") || s.includes("dépôt") || s.includes("depot")) {
+    return 1;
+  }
+  const clean = s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[,.]/g, "");
+  const parts = clean.split(/\s+/);
+  const MONTHS_NUM: Record<string, number> = {
+    janv: 1, janvier: 1,
+    fevr: 2, fev: 2, fevrier: 2,
+    mars: 3,
+    avr: 4, avril: 4,
+    mai: 5,
+    juin: 6,
+    juil: 7, juillet: 7,
+    aout: 8,
+    sept: 9, septembre: 9,
+    oct: 10, octobre: 10,
+    nov: 11, novembre: 11,
+    dec: 12, decembre: 12,
+  };
+  let month = -1;
+  let year = -1;
+  for (const p of parts) {
+    if (MONTHS_NUM[p] !== undefined) month = MONTHS_NUM[p];
+    if (/^\d{4}$/.test(p)) year = parseInt(p, 10);
+  }
+  if (year !== -1 && month !== -1) {
+    return year * 100 + month;
+  }
+  return 0;
+};
+
+export const comparePaymentsDesc = (a: any, b: any): number => {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  if (a.isVirtual && !b.isVirtual) return -1;
+  if (!a.isVirtual && b.isVirtual) return 1;
+
+  // 1. Payment Date DESC
+  const timeA = parsePaymentDateToTimestamp(a.payment_date || a.paymentDate || a.date);
+  const timeB = parsePaymentDateToTimestamp(b.payment_date || b.paymentDate || b.date);
+  if (timeA !== timeB) return timeB - timeA;
+
+  // 2. Created_at timestamp DESC (when recorded in DB)
+  const createdA = parsePaymentDateToTimestamp(a.created_at || a.createdAt);
+  const createdB = parsePaymentDateToTimestamp(b.created_at || b.createdAt);
+  if (createdA !== createdB) return createdB - createdA;
+
+  // 3. Period score DESC (e.g. Décembre 2026 before Novembre 2026 before Octobre 2026)
+  const scoreA = parsePeriodScore(a.period || a.period_month || a.periodMonth);
+  const scoreB = parsePeriodScore(b.period || b.period_month || b.periodMonth);
+  if (scoreA !== scoreB) return scoreB - scoreA;
+
+  // 4. Fallback on code or id
+  const codeA = String(a.code || a.id || "");
+  const codeB = String(b.code || b.id || "");
+  return codeB.localeCompare(codeA);
+};
+
+export const sortPaymentsDesc = <T = any>(list: T[]): T[] => {
+  if (!Array.isArray(list)) return [];
+  return [...list].sort(comparePaymentsDesc);
 };
 
 export const checkTenantHasImportedContract = (tenant: any, allBaux: any[] = []): boolean => {

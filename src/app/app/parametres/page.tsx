@@ -37,23 +37,18 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { 
-  savePdfTemplate, 
-  getPdfTemplate, 
-  saveReglementTemplate, 
-  getReglementTemplate,
-  saveGenericTemplate,
-  getGenericTemplate,
-  deleteGenericTemplate,
-  getAllStoredFiles,
-  restoreStoredFiles
+  getAllStoredFiles, 
+  restoreStoredFiles 
 } from "@/lib/storage";
+export type { CustomDocumentTemplate } from "@/lib/storage";
 import { syncRestoredDataToSupabase, isSupabaseConfigured, DEFAULT_COMPANY_ID } from "@/lib/dataService";
 import { supabase } from "@/lib/supabase";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
 import { UserPermissionRights, ModulePermissions, getDefaultPermissions } from "@/lib/companyCredentials";
 import { cn } from "@/lib/utils";
-import { getStoredCompanyInfo, saveStoredCompanyInfo } from "@/lib/companyInfo";
+import { getStoredCompanyInfo, saveStoredCompanyInfo, fetchCompanyFromSupabase, CompanyInfo, defaultCompanyInfo } from "@/lib/companyInfo";
+import { getGlobalPendingRentsVisibility, setGlobalPendingRentsVisibility } from "@/lib/portalSettings";
 
 export interface UserAccount {
   id: string;
@@ -68,14 +63,6 @@ export interface UserAccount {
   permissions: UserPermissionRights;
 }
 
-export interface CustomDocumentTemplate {
-  id: string;
-  title: string;
-  description: string;
-  fileName: string;
-  fileKey: string;
-  dateAdded: string;
-}
 
 const defaultUsersList: UserAccount[] = [
   {
@@ -131,15 +118,7 @@ const defaultUsersList: UserAccount[] = [
 export default function SettingsPage() {
   const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState("infos");
-  const [modeleName, setModeleName] = useState<string | null>(null);
-  const [modeleReglementName, setModeleReglementName] = useState<string | null>(null);
 
-  // Custom document templates list
-  const [customTemplates, setCustomTemplates] = useState<CustomDocumentTemplate[]>([]);
-  const [isAddTemplateModalOpen, setIsAddTemplateModalOpen] = useState(false);
-  const [newTemplateTitle, setNewTemplateTitle] = useState("");
-  const [newTemplateDescription, setNewTemplateDescription] = useState("");
-  const [newTemplateFile, setNewTemplateFile] = useState<File | null>(null);
 
   // Users state
   const [usersList, setUsersList] = useState<UserAccount[]>([]);
@@ -183,13 +162,11 @@ export default function SettingsPage() {
   });
 
   // Company Info state
-  const [companyInfo, setCompanyInfo] = useState({
-    name: "ImmoGestion Pro",
-    rccm: "CI-ABJ-03-2022-B12-12345",
-    address: "Cocody II Plateaux, Vallons, Abidjan",
-    phone: "0102030405",
-    email: "contact@immogestion-pro.ci",
-    logo: "",
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>(() => {
+    if (typeof window !== "undefined") {
+      return getStoredCompanyInfo();
+    }
+    return defaultCompanyInfo;
   });
   const logoInputRef = useRef<HTMLInputElement>(null);
 
@@ -255,11 +232,27 @@ export default function SettingsPage() {
     [key: string]: any;
   } | null>(null);
 
+  // Portail Visibilité state
+  const [showPendingRentsGlobal, setShowPendingRentsGlobal] = useState<boolean>(() => {
+    return getGlobalPendingRentsVisibility();
+  });
+
+  const handleTogglePendingRentsVisibility = () => {
+    const nextVal = !showPendingRentsGlobal;
+    setShowPendingRentsGlobal(nextVal);
+    setGlobalPendingRentsVisibility(nextVal);
+    showToast(
+      nextVal
+        ? "Visibilité activée : l'onglet 'Loyers en attente' est désormais affiché sur l'espace propriétaire."
+        : "Visibilité désactivée : l'onglet 'Loyers en attente' est masqué sur l'espace propriétaire."
+    );
+  };
+
   useEffect(() => {
     // Load Last Backup Date
     // Load Active Tab
     const savedTab = localStorage.getItem("gestimmo_settings_active_tab");
-    if (savedTab && ["infos", "facturation", "modeles", "users", "archivage"].includes(savedTab)) {
+    if (savedTab && ["infos", "facturation", "portails", "users", "archivage"].includes(savedTab)) {
       setActiveTab(savedTab);
     }
 
@@ -267,14 +260,6 @@ export default function SettingsPage() {
     const savedBackupDate = localStorage.getItem("gestimmo_last_backup_date");
     if (savedBackupDate) {
       setLastBackupDate(savedBackupDate);
-    }
-
-    // Load Custom Templates
-    const savedCustom = localStorage.getItem("gestimmo_custom_templates_list");
-    if (savedCustom) {
-      try {
-        setCustomTemplates(JSON.parse(savedCustom));
-      } catch (e) {}
     }
 
     // Load Users
@@ -310,28 +295,32 @@ export default function SettingsPage() {
     const initialCompany = getStoredCompanyInfo();
     setCompanyInfo(initialCompany);
 
-    // Load Templates
-    getPdfTemplate().then((savedModele) => {
-      if (savedModele) {
-        setModeleName("modèle_contrat.pdf (Sauvegardé)");
-      } else {
-        const old = localStorage.getItem("gestimmo_modele_contrat");
-        if (old) setModeleName("modèle_contrat.pdf (Sauvegardé)");
-      }
-    });
-
-    getReglementTemplate().then((savedReglement) => {
-      if (savedReglement) {
-        const savedName = localStorage.getItem("gestimmo_modele_reglement_name") || "modèle_règlement_intérieur.pdf";
-        setModeleReglementName(`${savedName} (Sauvegardé)`);
-      } else {
-        const old = localStorage.getItem("gestimmo_modele_reglement");
-        if (old) {
-          const savedName = localStorage.getItem("gestimmo_modele_reglement_name") || "modèle_règlement_intérieur.pdf";
-          setModeleReglementName(`${savedName} (Sauvegardé)`);
+    if (isSupabaseConfigured()) {
+      fetchCompanyFromSupabase().then((remote) => {
+        if (remote) {
+          setCompanyInfo((prev) => ({
+            ...prev,
+            ...remote,
+            rccm: prev.rccm || remote.rccm || defaultCompanyInfo.rccm,
+          }));
         }
+      });
+    }
+
+    const handleCompanyUpdate = (e: any) => {
+      if (e.detail) {
+        setCompanyInfo(e.detail);
+      } else {
+        setCompanyInfo(getStoredCompanyInfo());
       }
-    });
+    };
+    window.addEventListener("gestimmo_company_updated", handleCompanyUpdate);
+    window.addEventListener("storage", handleCompanyUpdate);
+
+    return () => {
+      window.removeEventListener("gestimmo_company_updated", handleCompanyUpdate);
+      window.removeEventListener("storage", handleCompanyUpdate);
+    };
   }, []);
 
   const getStorageStats = () => {
@@ -666,210 +655,7 @@ export default function SettingsPage() {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type === "application/pdf") {
-      setModeleName("Sauvegarde en cours...");
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
-        try {
-          await savePdfTemplate(base64String);
-          setModeleName(`${file.name} (Sauvegardé)`);
-          showToast("Modèle de contrat sauvegardé avec succès !");
-        } catch (error) {
-          console.error(error);
-          alert("Erreur lors de la sauvegarde du modèle.");
-          setModeleName(null);
-        }
-      };
-      reader.readAsDataURL(file);
-    } else {
-      alert("Veuillez sélectionner un fichier PDF valide.");
-    }
-  };
 
-  const handleReglementFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type === "application/pdf") {
-      setModeleReglementName("Sauvegarde en cours...");
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
-        try {
-          await saveReglementTemplate(base64String);
-          try {
-            localStorage.setItem("gestimmo_modele_reglement", base64String);
-            localStorage.setItem("gestimmo_modele_reglement_name", file.name);
-          } catch (err) {
-            console.error(err);
-          }
-          setModeleReglementName(`${file.name} (Sauvegardé)`);
-          showToast("Modèle de règlement intérieur sauvegardé avec succès !");
-        } catch (error) {
-          console.error(error);
-          alert("Erreur lors de la sauvegarde du modèle de règlement intérieur.");
-          setModeleReglementName(null);
-        }
-      };
-      reader.readAsDataURL(file);
-    } else {
-      alert("Veuillez sélectionner un fichier PDF valide.");
-    }
-  };
-
-  const handleDownloadDefaultContrat = async () => {
-    try {
-      let base64 = await getPdfTemplate();
-      if (!base64) base64 = localStorage.getItem("gestimmo_modele_contrat");
-      if (!base64) {
-        alert("Aucun fichier PDF n'a été importé pour ce modèle.");
-        return;
-      }
-      const a = document.createElement("a");
-      a.href = base64;
-      a.download = "modèle_contrat.pdf";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {
-      console.error(e);
-      alert("Erreur lors du téléchargement.");
-    }
-  };
-
-  const handleDownloadDefaultReglement = async () => {
-    try {
-      let base64 = await getReglementTemplate();
-      if (!base64) base64 = localStorage.getItem("gestimmo_modele_reglement");
-      if (!base64) {
-        alert("Aucun fichier PDF n'a été importé pour ce modèle.");
-        return;
-      }
-      const name = localStorage.getItem("gestimmo_modele_reglement_name") || "modèle_règlement_intérieur.pdf";
-      const a = document.createElement("a");
-      a.href = base64;
-      a.download = name.endsWith(".pdf") ? name : `${name}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {
-      console.error(e);
-      alert("Erreur lors du téléchargement.");
-    }
-  };
-
-  const handleCreateCustomTemplate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTemplateTitle.trim() || !newTemplateFile) {
-      alert("Veuillez renseigner le titre du modèle et sélectionner un fichier PDF.");
-      return;
-    }
-
-    if (newTemplateFile.type !== "application/pdf") {
-      alert("Veuillez sélectionner un fichier PDF valide.");
-      return;
-    }
-
-    const fileKey = `gestimmo_custom_template_${Date.now()}`;
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64String = reader.result as string;
-      try {
-        await saveGenericTemplate(fileKey, base64String);
-        try {
-          localStorage.setItem(fileKey, base64String);
-        } catch (err) {}
-
-        const newTemplate: CustomDocumentTemplate = {
-          id: `TPL-${Date.now()}`,
-          title: newTemplateTitle.trim(),
-          description: newTemplateDescription.trim(),
-          fileName: newTemplateFile.name,
-          fileKey: fileKey,
-          dateAdded: new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }),
-        };
-
-        const updated = [...customTemplates, newTemplate];
-        setCustomTemplates(updated);
-        localStorage.setItem("gestimmo_custom_templates_list", JSON.stringify(updated));
-
-        showToast(`Modèle "${newTemplateTitle}" ajouté avec succès !`);
-        setIsAddTemplateModalOpen(false);
-        setNewTemplateTitle("");
-        setNewTemplateDescription("");
-        setNewTemplateFile(null);
-      } catch (err) {
-        console.error(err);
-        alert("Erreur lors de la sauvegarde du fichier PDF modèle.");
-      }
-    };
-    reader.readAsDataURL(newTemplateFile);
-  };
-
-  const handleReplaceCustomTemplateFile = (template: CustomDocumentTemplate, file: File) => {
-    if (file.type !== "application/pdf") {
-      alert("Veuillez sélectionner un fichier PDF valide.");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64String = reader.result as string;
-      try {
-        await saveGenericTemplate(template.fileKey, base64String);
-        try {
-          localStorage.setItem(template.fileKey, base64String);
-        } catch (err) {}
-
-        const updated = customTemplates.map((t) =>
-          t.id === template.id ? { ...t, fileName: file.name } : t
-        );
-        setCustomTemplates(updated);
-        localStorage.setItem("gestimmo_custom_templates_list", JSON.stringify(updated));
-
-        showToast(`Fichier PDF pour "${template.title}" mis à jour !`);
-      } catch (err) {
-        console.error(err);
-        alert("Erreur lors de la mise à jour du fichier.");
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleDownloadCustomTemplate = async (template: CustomDocumentTemplate) => {
-    try {
-      let base64 = await getGenericTemplate(template.fileKey);
-      if (!base64) base64 = localStorage.getItem(template.fileKey);
-      if (!base64) {
-        alert(`Aucun fichier PDF n'a été trouvé pour "${template.title}".`);
-        return;
-      }
-      const a = document.createElement("a");
-      a.href = base64;
-      a.download = template.fileName.endsWith(".pdf") ? template.fileName : `${template.fileName}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {
-      console.error(e);
-      alert("Erreur lors du téléchargement du modèle.");
-    }
-  };
-
-  const handleDeleteCustomTemplate = async (template: CustomDocumentTemplate) => {
-    if (!confirm(`Voulez-vous vraiment supprimer le modèle "${template.title}" ?`)) return;
-    try {
-      await deleteGenericTemplate(template.fileKey);
-      localStorage.removeItem(template.fileKey);
-    } catch (e) {
-      console.error(e);
-    }
-    const updated = customTemplates.filter((t) => t.id !== template.id);
-    setCustomTemplates(updated);
-    localStorage.setItem("gestimmo_custom_templates_list", JSON.stringify(updated));
-    showToast(`Modèle "${template.title}" supprimé.`);
-  };
 
   const getRoleBadgeVariant = (role: UserAccount["role"]) => {
     switch (role) {
@@ -959,10 +745,11 @@ export default function SettingsPage() {
           </button>
           <button 
             type="button"
-            onClick={() => handleTabChange("modeles")}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 font-medium rounded-lg text-sm transition-colors text-left ${activeTab === 'modeles' ? 'bg-primary-50 text-primary font-semibold' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
-            <FileText className="w-4 h-4" /> Modèles de documents ({2 + customTemplates.length})
+            onClick={() => handleTabChange("portails")}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 font-medium rounded-lg text-sm transition-colors text-left ${activeTab === 'portails' ? 'bg-primary-50 text-primary font-semibold' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
+            <Sliders className="w-4 h-4" /> Portails &amp; Accès
           </button>
+
           <button 
             type="button"
             onClick={() => handleTabChange("users")}
@@ -1043,7 +830,7 @@ export default function SettingsPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Nom de l'entreprise</label>
                   <input 
                     type="text" 
-                    value={companyInfo.name} 
+                    value={companyInfo.name || ""} 
                     onChange={(e) => setCompanyInfo({ ...companyInfo, name: e.target.value })}
                     className="w-full px-3 py-2 border border-app-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/20 text-gray-900 font-medium" 
                   />
@@ -1052,7 +839,7 @@ export default function SettingsPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Numéro RCCM / SIRET</label>
                   <input 
                     type="text" 
-                    value={companyInfo.rccm} 
+                    value={companyInfo.rccm || ""} 
                     onChange={(e) => setCompanyInfo({ ...companyInfo, rccm: e.target.value })}
                     className="w-full px-3 py-2 border border-app-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/20 text-gray-900 font-mono" 
                   />
@@ -1061,7 +848,7 @@ export default function SettingsPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Adresse du siège social</label>
                   <input 
                     type="text" 
-                    value={companyInfo.address} 
+                    value={companyInfo.address || ""} 
                     onChange={(e) => setCompanyInfo({ ...companyInfo, address: e.target.value })}
                     className="w-full px-3 py-2 border border-app-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/20 text-gray-900" 
                   />
@@ -1070,7 +857,7 @@ export default function SettingsPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Téléphone contact</label>
                   <input 
                     type="tel" 
-                    value={companyInfo.phone} 
+                    value={companyInfo.phone || ""} 
                     onChange={(e) => setCompanyInfo({ ...companyInfo, phone: e.target.value })}
                     className="w-full px-3 py-2 border border-app-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/20 text-gray-900 font-medium" 
                   />
@@ -1079,7 +866,7 @@ export default function SettingsPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Email de contact</label>
                   <input 
                     type="email" 
-                    value={companyInfo.email} 
+                    value={companyInfo.email || ""} 
                     onChange={(e) => setCompanyInfo({ ...companyInfo, email: e.target.value })}
                     className="w-full px-3 py-2 border border-app-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/20 text-gray-900 font-medium" 
                   />
@@ -1216,150 +1003,70 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
-
-          {/* TAB 3: MODÈLES DE DOCUMENTS */}
-          {activeTab === "modeles" && (
+ 
+          {/* TAB 3: PORTAILS & ACCÈS */}
+          {activeTab === "portails" && (
             <div className="bg-white p-6 rounded-2xl border border-app-border shadow-sm space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Modèles de documents</h2>
-                  <p className="text-sm text-gray-500 mt-0.5">Importez vos modèles de contrats, règlements intérieurs et documents types.</p>
-                </div>
-                <button
-                  onClick={() => {
-                    setNewTemplateTitle("");
-                    setNewTemplateDescription("");
-                    setNewTemplateFile(null);
-                    setIsAddTemplateModalOpen(true);
-                  }}
-                  className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center shadow-sm shrink-0"
-                >
-                  <Plus className="w-4 h-4 mr-2" /> Ajouter un modèle de document
-                </button>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Options des Portails Externes</h2>
+                <p className="text-sm text-gray-500 mt-1">Configurez les fonctionnalités et options visibles par vos propriétaires et locataires sur leurs espaces respectifs.</p>
               </div>
-              
-              <div className="space-y-4">
-                {/* Default Template 1: Contrat de Bail */}
-                <div className="border border-app-border rounded-xl p-5 hover:border-gray-300 transition-colors">
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                    <div className="space-y-1">
-                      <h3 className="text-base font-semibold text-gray-900">Modèle de Contrat de Bail</h3>
-                      <p className="text-sm text-gray-500">Importez un fichier PDF contenant des pointillés. Le système remplira automatiquement les données du locataire par-dessus.</p>
-                      
-                      <div className="pt-3 flex flex-wrap items-center gap-3">
-                        <label className="cursor-pointer bg-white border border-app-border text-gray-700 px-3.5 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors flex items-center shadow-sm">
-                          <Upload className="w-3.5 h-3.5 mr-1.5 text-gray-500" />
-                          {modeleName ? "Remplacer le PDF" : "Importer un PDF"}
-                          <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
-                        </label>
 
-                        {modeleName && (
-                          <button
-                            onClick={handleDownloadDefaultContrat}
-                            className="bg-white border border-app-border text-primary px-3.5 py-1.5 rounded-lg text-xs font-medium hover:bg-primary-50 transition-colors flex items-center shadow-sm"
-                            title="Télécharger le modèle de contrat en PDF"
-                          >
-                            <Download className="w-3.5 h-3.5 mr-1.5 text-primary" /> Télécharger
-                          </button>
-                        )}
-
-                        {modeleName && (
-                          <span className="text-xs text-emerald-600 font-semibold flex items-center">
-                            ✓ {modeleName}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+              {/* Section Portail Propriétaire */}
+              <div className="border border-app-border rounded-xl p-5 space-y-4 bg-gray-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-blue-100 text-blue-700 rounded-xl">
+                    <Building className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900">Espace Propriétaire (/proprietaire)</h3>
+                    <p className="text-xs text-gray-500">Droits et modules accessibles aux bailleurs lors de leur connexion</p>
                   </div>
                 </div>
 
-                {/* Default Template 2: Règlement Intérieur */}
-                <div className="border border-app-border rounded-xl p-5 hover:border-gray-300 transition-colors">
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                    <div className="space-y-1">
-                      <h3 className="text-base font-semibold text-gray-900">Modèle de Règlement Intérieur</h3>
-                      <p className="text-sm text-gray-500">Importez un fichier PDF contenant le règlement intérieur à utiliser comme modèle.</p>
-                      
-                      <div className="pt-3 flex flex-wrap items-center gap-3">
-                        <label className="cursor-pointer bg-white border border-app-border text-gray-700 px-3.5 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors flex items-center shadow-sm">
-                          <Upload className="w-3.5 h-3.5 mr-1.5 text-gray-500" />
-                          {modeleReglementName ? "Remplacer le PDF" : "Importer un PDF"}
-                          <input type="file" accept="application/pdf" className="hidden" onChange={handleReglementFileUpload} />
-                        </label>
-
-                        {modeleReglementName && (
-                          <button
-                            onClick={handleDownloadDefaultReglement}
-                            className="bg-white border border-app-border text-primary px-3.5 py-1.5 rounded-lg text-xs font-medium hover:bg-primary-50 transition-colors flex items-center shadow-sm"
-                            title="Télécharger le modèle de règlement intérieur en PDF"
-                          >
-                            <Download className="w-3.5 h-3.5 mr-1.5 text-primary" /> Télécharger
-                          </button>
-                        )}
-
-                        {modeleReglementName && (
-                          <span className="text-xs text-emerald-600 font-semibold flex items-center">
-                            ✓ {modeleReglementName}
-                          </span>
-                        )}
-                      </div>
+                <div className="bg-white p-4 rounded-xl border border-app-border flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-gray-900">Bouton &amp; Onglet « Loyers en attente »</span>
+                      {showPendingRentsGlobal ? (
+                        <Badge variant="success" dot className="text-xs">Visible</Badge>
+                      ) : (
+                        <Badge variant="default" dot className="text-xs">Masqué</Badge>
+                      )}
                     </div>
+                    <p className="text-xs text-gray-500 max-w-xl leading-relaxed">
+                      Permet aux propriétaires de voir sur leur menu latéral et leur espace les loyers déjà réglés par leurs locataires mais dont le virement de reversement financier (CRG) n'a pas encore été exécuté par votre agence.
+                    </p>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={handleTogglePendingRentsVisibility}
+                    className={cn(
+                      "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
+                      showPendingRentsGlobal ? "bg-primary" : "bg-gray-200"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                        showPendingRentsGlobal ? "translate-x-5" : "translate-x-0"
+                      )}
+                    />
+                  </button>
                 </div>
 
-                {/* Custom User Added Templates */}
-                {customTemplates.map((template) => (
-                  <div key={template.id} className="border border-app-border rounded-xl p-5 hover:border-gray-300 transition-colors relative">
-                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                      <div className="space-y-1 flex-1">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-base font-semibold text-gray-900">{template.title}</h3>
-                          <button
-                            onClick={() => handleDeleteCustomTemplate(template)}
-                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200"
-                            title="Supprimer ce modèle de document"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                        {template.description && (
-                          <p className="text-sm text-gray-500">{template.description}</p>
-                        )}
-
-                        <div className="pt-3 flex flex-wrap items-center gap-3">
-                          <label className="cursor-pointer bg-white border border-app-border text-gray-700 px-3.5 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors flex items-center shadow-sm">
-                            <Upload className="w-3.5 h-3.5 mr-1.5 text-gray-500" />
-                            Remplacer le PDF
-                            <input
-                              type="file"
-                              accept="application/pdf"
-                              className="hidden"
-                              onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (f) handleReplaceCustomTemplateFile(template, f);
-                              }}
-                            />
-                          </label>
-
-                          <button
-                            onClick={() => handleDownloadCustomTemplate(template)}
-                            className="bg-white border border-app-border text-primary px-3.5 py-1.5 rounded-lg text-xs font-medium hover:bg-primary-50 transition-colors flex items-center shadow-sm"
-                            title="Télécharger ce modèle en PDF"
-                          >
-                            <Download className="w-3.5 h-3.5 mr-1.5 text-primary" /> Télécharger
-                          </button>
-
-                          <span className="text-xs text-emerald-600 font-semibold flex items-center">
-                            ✓ {template.fileName} (Sauvegardé)
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                <div className="text-xs text-gray-600 bg-blue-50/70 p-3.5 rounded-xl border border-blue-100 flex items-start gap-2.5">
+                  <span className="font-semibold text-primary">💡 Note administrateur :</span>
+                  <span>
+                    Ce réglage s'applique par défaut à tous les propriétaires. Vous pouvez également personnaliser cette visibilité individuellement pour un propriétaire spécifique depuis sa fiche dans le menu « Propriétaires ».
+                  </span>
+                </div>
               </div>
             </div>
           )}
+
+
 
           {/* TAB 4: UTILISATEURS (3) */}
           {activeTab === "users" && (
@@ -1671,82 +1378,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Modal: Add Custom Document Template */}
-      {isAddTemplateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-app-border flex justify-between items-center bg-gray-50/50">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-primary/10 text-primary rounded-xl">
-                  <FileText className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">Ajouter un modèle de document</h3>
-                  <p className="text-xs text-gray-500">Importez un nouveau fichier PDF modèle</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsAddTemplateModalOpen(false)}
-                className="p-1.5 hover:bg-gray-200 rounded-full text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <form onSubmit={handleCreateCustomTemplate} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Titre du document *</label>
-                <input
-                  type="text"
-                  required
-                  value={newTemplateTitle}
-                  onChange={(e) => setNewTemplateTitle(e.target.value)}
-                  placeholder="Ex: Acte de caution solidaire"
-                  className="w-full px-3 py-2 border border-app-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/20 text-gray-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description (optionnelle)</label>
-                <textarea
-                  rows={2}
-                  value={newTemplateDescription}
-                  onChange={(e) => setNewTemplateDescription(e.target.value)}
-                  placeholder="Ex: Document à faire signer par la caution solidaire avant la remise des clés."
-                  className="w-full px-3 py-2 border border-app-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/20 text-gray-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Fichier PDF du modèle *</label>
-                <input
-                  type="file"
-                  required
-                  accept="application/pdf"
-                  onChange={(e) => setNewTemplateFile(e.target.files?.[0] || null)}
-                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary hover:file:bg-primary-100 cursor-pointer"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-app-border mt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsAddTemplateModalOpen(false)}
-                  className="bg-white border border-app-border text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  className="bg-primary text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm"
-                >
-                  Créer le modèle
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Add / Edit User Modal with Permissions */}
       {isAddUserModalOpen && (

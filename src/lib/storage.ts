@@ -1,3 +1,22 @@
+import { generateDefaultContratBail, generateDefaultReglementInterieur } from "@/lib/pdfGenerator";
+
+export interface CustomDocumentTemplate {
+  id: string;
+  title: string;
+  description: string;
+  fileName: string;
+  fileKey: string;
+  dateAdded: string;
+}
+
+export interface OwnerTemplatesConfig {
+  contratFileName?: string;
+  contratFileKey?: string;
+  reglementFileName?: string;
+  reglementFileKey?: string;
+  customTemplates?: CustomDocumentTemplate[];
+}
+
 export const savePdfTemplate = async (base64: string): Promise<void> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open("GestimmoDB", 1);
@@ -203,5 +222,51 @@ export const restoreStoredFiles = async (filesMap: Record<string, string>): Prom
     };
     request.onerror = () => reject(request.error);
   });
+};
+
+export const getOrGenerateContratTemplate = async (ownerName?: string, fileKey?: string): Promise<string> => {
+  let base64: string | null = null;
+  if (fileKey) {
+    try {
+      base64 = await getGenericTemplate(fileKey);
+    } catch {}
+  }
+  if (!base64) {
+    try {
+      base64 = await getPdfTemplate();
+    } catch {}
+  }
+  if (!base64 && typeof window !== "undefined") {
+    try {
+      base64 = localStorage.getItem("gestimmo_modele_contrat");
+    } catch {}
+  }
+  if (!base64) {
+    base64 = await generateDefaultContratBail({ ownerName });
+  }
+  return base64;
+};
+
+export const getOrGenerateReglementTemplate = async (ownerName?: string, fileKey?: string): Promise<string> => {
+  let base64: string | null = null;
+  if (fileKey) {
+    try {
+      base64 = await getGenericTemplate(fileKey);
+    } catch {}
+  }
+  if (!base64) {
+    try {
+      base64 = await getReglementTemplate();
+    } catch {}
+  }
+  if (!base64 && typeof window !== "undefined") {
+    try {
+      base64 = localStorage.getItem("gestimmo_modele_reglement");
+    } catch {}
+  }
+  if (!base64) {
+    base64 = await generateDefaultReglementInterieur({ ownerName });
+  }
+  return base64;
 };
 

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Badge } from "@/components/ui/Badge";
-import { Search, ArrowRightLeft, FileText, CheckCircle, PlusCircle, CalendarDays, Banknote, X, RotateCcw, AlertTriangle, Printer, Building2, UserCheck, RefreshCw, Download, ChevronDown } from "lucide-react";
+import { Search, ArrowRightLeft, FileText, CheckCircle, PlusCircle, CalendarDays, Banknote, X, RotateCcw, AlertTriangle, Printer, Building2, UserCheck, RefreshCw, Download, ChevronDown, History, Clock, Eye, Filter } from "lucide-react";
 import Link from "next/link";
-import { loadAllDataFromDatabase, createPayout, deletePayout, isSupabaseConfigured } from "@/lib/dataService";
+import { loadAllDataFromDatabase, createPayout, deletePayout, isSupabaseConfigured, invalidateDatabaseCache } from "@/lib/dataService";
 import { formatUnitDisplay, formatFCFA, syncPaymentsWithLeases } from "@/lib/utils";
 
 const generateReference = (method: string = "Virement bancaire") => {
@@ -152,12 +152,25 @@ const isPaymentForOwner = (
   return false;
 };
 
+const isAllPeriods = (p?: string | null) => {
+  if (!p) return true;
+  const s = p.trim().toLowerCase();
+  return (
+    s === "toutes les périodes" ||
+    s === "toutes les periodes" ||
+    s === "tous les mois" ||
+    s === "tous" ||
+    s === "__toutes__" ||
+    s === "toutes"
+  );
+};
+
 export default function ReversementsPage() {
   const { can } = usePermissions();
   const [rows, setRows] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [isOwnerDropdownOpen, setIsOwnerDropdownOpen] = useState(false);
-  const [periodFilter, setPeriodFilter] = useState("Tous les mois");
+  const [periodFilter, setPeriodFilter] = useState("Toutes les périodes");
   const [statusFilter, setStatusFilter] = useState("Tous");
   const [bienFilter, setBienFilter] = useState("Tous les biens");
   const [logementFilter, setLogementFilter] = useState("Tous les appartements");
@@ -170,6 +183,17 @@ export default function ReversementsPage() {
   const [bilanPeriod, setBilanPeriod] = useState("__TOUTES__");
   const [bilanBien, setBilanBien] = useState("__TOUS__");
   const [bilanGerant, setBilanGerant] = useState("__TOUS__");
+
+  // Modale dédiée : Historique des reversements
+  const [historiqueModal, setHistoriqueModal] = useState<any | null>(null);
+  const [histPeriodFilter, setHistPeriodFilter] = useState<string>("__TOUTES__");
+  const [histBienFilter, setHistBienFilter] = useState<string>("__TOUS__");
+  const [histGerantFilter, setHistGerantFilter] = useState<string>("__TOUS__");
+
+  // Modale dédiée : Bordereau des reversements non effectués / en attente
+  const [pendingModalOpen, setPendingModalOpen] = useState(false);
+  const [pendingModalOwnerFilter, setPendingModalOwnerFilter] = useState("__TOUS__");
+  const [pendingModalPeriodFilter, setPendingModalPeriodFilter] = useState("__TOUTES__");
 
   // --- État de la modale de reversement contextuelle ---
   const [reverserOpen, setReverserOpen] = useState(false);
@@ -280,6 +304,15 @@ export default function ReversementsPage() {
     let historicalRev: any[] = storedRev ? JSON.parse(storedRev) : (isDbActive ? [] : initialReversements);
     if (!storedRev && !isDbActive) localStorage.setItem("gestimmo_reversements", JSON.stringify(initialReversements));
 
+    // When Supabase is active, clean out obsolete R- ghost records from localStorage
+    if (isDbActive && Array.isArray(historicalRev)) {
+      const cleanRev = historicalRev.filter((r: any) => r && r.id && !String(r.id).startsWith("R-"));
+      if (cleanRev.length !== historicalRev.length) {
+        historicalRev = cleanRev;
+        localStorage.setItem("gestimmo_reversements", JSON.stringify(cleanRev));
+      }
+    }
+
     let revChanged = false;
     historicalRev = historicalRev.map((r: any) => {
       let rawAmt = typeof r.amount === "number" ? r.amount : parseFloat(String(r.amount || 0).replace(/[^0-9.-]+/g, ""));
@@ -288,8 +321,6 @@ export default function ReversementsPage() {
       if (Math.abs(cleanAmt - Math.round(cleanAmt / 1000) * 1000) < 10) {
         cleanAmt = Math.round(cleanAmt / 1000) * 1000;
       }
-      if (cleanAmt === 1120000) cleanAmt = 1260000;
-      if (cleanAmt === 1540000) cleanAmt = 1680000;
 
       let rawColl = typeof r.collected === "number" ? r.collected : parseFloat(String(r.collected || 0).replace(/[^0-9.-]+/g, ""));
       if (isNaN(rawColl)) rawColl = 0;
@@ -297,8 +328,6 @@ export default function ReversementsPage() {
       if (Math.abs(cleanColl - Math.round(cleanColl / 1000) * 1000) < 10) {
         cleanColl = Math.round(cleanColl / 1000) * 1000;
       }
-      if (cleanColl === 1120000) cleanColl = 1260000;
-      if (cleanColl === 1540000) cleanColl = 1680000;
 
       if (cleanAmt !== r.amount || cleanColl !== r.collected) {
         revChanged = true;
@@ -358,24 +387,74 @@ export default function ReversementsPage() {
             : rounded;
         };
 
-        const rawCollected = ownerPaiements.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
-        let totalCollected = cleanVal(rawCollected);
-        if (totalCollected === 0 && owner.collected) {
-          totalCollected = cleanVal(Number(owner.collected));
-        }
-        if (totalCollected === 1540000 || totalCollected === 1120000) {
-          totalCollected = 1680000;
-        }
-
-        const effectues = historicalRev.filter((r: any) => isSameOwner(owner.id, owner.name, r.ownerId, r.owner) && r.status === "EFFECTUÉ");
-        const totalPaid = cleanVal(effectues.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0));
-
         const ownerRate = owner.commissionRate !== undefined && owner.commissionRate !== null && owner.commissionRate !== ""
           ? Number(owner.commissionRate)
           : (owner.commission_rate !== undefined && owner.commission_rate !== null && owner.commission_rate !== "" ? Number(owner.commission_rate) : 0);
         const validRate = isNaN(ownerRate) ? 0 : ownerRate;
+
+        // Identifier les périodes distinctes pour ce propriétaire (incluant loyers et cautions)
+        const distinctPeriods = Array.from(new Set([
+          ...ownerPaiements.map((p: any) => p.period).filter(Boolean),
+          ...historicalRev.filter((r: any) => isSameOwner(owner.id, owner.name, r.ownerId, r.owner)).map((r: any) => r.period).filter(Boolean)
+        ])).filter((per: string) => per && per !== "—" && !isAllPeriods(per));
+
+        let totalCalculatedBalance = 0;
+        let totalCalculatedPaid = 0;
+        let totalCalculatedCollected = 0;
+        let pendingPeriodsList: string[] = [];
+
+        distinctPeriods.forEach((per) => {
+          const pPays = ownerPaiements.filter((p: any) => (p.period || "").trim().toLowerCase() === per.trim().toLowerCase());
+          const pColl = cleanVal(pPays.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0));
+          const pNet = cleanVal(pColl * ((100 - validRate) / 100));
+
+          const pRevs = historicalRev.filter((r: any) =>
+            isSameOwner(owner.id, owner.name, r.ownerId, r.owner) &&
+            r.status === "EFFECTUÉ" &&
+            (r.period || "").trim().toLowerCase() === per.trim().toLowerCase()
+          );
+
+          // Déduplication stricte des reversements pour éviter tout double comptage
+          const seenKeys = new Set<string>();
+          const dedupedRevs = pRevs.filter((r: any) => {
+            const k = r.id || `${r.period}-${r.amount}-${r.reference || ''}-${r.date || ''}`;
+            if (seenKeys.has(k)) return false;
+            seenKeys.add(k);
+            return true;
+          });
+
+          const pRawPaid = cleanVal(dedupedRevs.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0));
+          // Règle d'or : un montant est reversé une et une seule fois ! Le total payé pour une période est plafonné au net dû.
+          const pPaid = pNet > 0 ? Math.min(pNet, pRawPaid) : pRawPaid;
+          const pBal = Math.max(0, pNet - pPaid);
+
+          totalCalculatedCollected += pColl;
+          totalCalculatedPaid += pPaid;
+          totalCalculatedBalance += pBal;
+          if (pBal > 0) {
+            pendingPeriodsList.push(per);
+          }
+        });
+
+        const rawCollected = ownerPaiements.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+        let totalCollected = distinctPeriods.length > 0 ? totalCalculatedCollected : cleanVal(rawCollected);
+        if (totalCollected === 0 && owner.collected) {
+          totalCollected = cleanVal(Number(owner.collected));
+        }
+
+        // Tous les reversements effectués pour ce propriétaire (incluant loyers et cautions pour l'historique et l'annulation)
+        const seenBuildEffKeys = new Set<string>();
+        const effectues = historicalRev.filter((r: any) => {
+          if (!isSameOwner(owner.id, owner.name, r.ownerId, r.owner) || r.status !== "EFFECTUÉ") return false;
+          const k = r.id || `${r.period}-${r.amount}-${r.reference || ''}-${r.date || ''}`;
+          if (seenBuildEffKeys.has(k)) return false;
+          seenBuildEffKeys.add(k);
+          return true;
+        });
+        const totalPaid = distinctPeriods.length > 0 ? totalCalculatedPaid : cleanVal(effectues.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0));
+
         const netToOwner = cleanVal(totalCollected * ((100 - validRate) / 100));
-        const balance = Math.max(0, netToOwner - totalPaid);
+        const balance = distinctPeriods.length > 0 ? totalCalculatedBalance : Math.max(0, netToOwner - totalPaid);
         const commission = cleanVal(totalCollected * (validRate / 100));
 
         const pendingRev = historicalRev.find((r: any) => isSameOwner(owner.id, owner.name, r.ownerId, r.owner) && r.status === "EN ATTENTE");
@@ -383,16 +462,9 @@ export default function ReversementsPage() {
 
         const status = !hasActivity ? "AUCUN LOYER" : balance < 1 ? "EFFECTUÉ" : "EN ATTENTE";
 
-        const lastRev = [...historicalRev]
-          .filter((r) => isSameOwner(owner.id, owner.name, r.ownerId, r.owner))
-          .sort((a, b) => b.id.localeCompare(a.id))[0];
-
-        const sortedPaiements = [...ownerPaiements].sort((a: any, b: any) =>
-          (b.date || b.payment_date || "").localeCompare(a.date || a.payment_date || "")
-        );
-        const latestPaiementPeriod = sortedPaiements[0]?.period || sortedPaiements[0]?.period_month;
-
-        const period = pendingRev?.period || latestPaiementPeriod || lastRev?.period || (hasActivity ? "Octobre 2026" : "—");
+        const period = pendingPeriodsList.length > 0
+          ? (pendingPeriodsList.length === 1 ? pendingPeriodsList[0] : `${pendingPeriodsList[0]} (+${pendingPeriodsList.length - 1})`)
+          : (hasActivity ? (balance < 1 ? "Toutes les périodes" : (pendingRev?.period || "En cours")) : "—");
 
         return {
           id: pendingRev ? pendingRev.id : `R-DYN-${owner.id}`,
@@ -417,6 +489,9 @@ export default function ReversementsPage() {
   const loadData = useCallback(async () => {
     const dbState = await loadAllDataFromDatabase();
     if (dbState) {
+      if (typeof window !== "undefined" && dbState.payouts) {
+        localStorage.setItem("gestimmo_reversements", JSON.stringify(dbState.payouts));
+      }
       const data = {
         owners: dbState.owners,
         biens: dbState.properties,
@@ -477,24 +552,56 @@ export default function ReversementsPage() {
   };
 
   // --- Annuler un reversement ---
-  const handleAnnulerReversement = async (revId: string) => {
+  const handleAnnulerReversement = async (revToCancel: any) => {
+    const revId = typeof revToCancel === "string" ? revToCancel : revToCancel?.id;
+    const revOwnerId = typeof revToCancel === "object" ? revToCancel?.ownerId : undefined;
+    const revOwner = typeof revToCancel === "object" ? revToCancel?.owner : undefined;
+    const revPeriod = typeof revToCancel === "object" ? revToCancel?.period : undefined;
+    const revAmount = typeof revToCancel === "object" ? revToCancel?.amount : undefined;
+
+    // 1. Delete from Supabase if active
     if (revId && !revId.startsWith("R-") && !revId.startsWith("R-DYN-")) {
       await deletePayout(revId);
+    } else {
+      // If revId was a local R- ID, check if there is a matching payout in rawData.historicalRev that has a UUID
+      const dbMatch = rawData.historicalRev.find((r: any) =>
+        r.id && !r.id.startsWith("R-") && !r.id.startsWith("R-DYN-") &&
+        ((revOwnerId && r.ownerId === revOwnerId) || (revOwner && r.owner && r.owner.trim().toUpperCase() === revOwner.trim().toUpperCase())) &&
+        (revPeriod && (r.period || "").trim().toLowerCase() === revPeriod.trim().toLowerCase()) &&
+        (revAmount !== undefined && Math.abs(Number(r.amount) - Number(revAmount)) < 10)
+      );
+      if (dbMatch?.id) {
+        await deletePayout(dbMatch.id);
+      }
     }
+
+    // 2. Remove from localStorage (both by ID and by owner+period+amount match to eradicate ghost duplicates)
     const storedRev = localStorage.getItem("gestimmo_reversements");
     let historical: any[] = storedRev ? JSON.parse(storedRev) : [];
 
-    historical = historical.filter((r: any) => r.id !== revId);
+    historical = historical.filter((r: any) => {
+      if (r.id === revId) return false;
+      if (revOwner && revPeriod && revAmount !== undefined) {
+        const matchOwner = (revOwnerId && r.ownerId === revOwnerId) ||
+          (r.owner && revOwner && r.owner.trim().toUpperCase() === revOwner.trim().toUpperCase());
+        const matchPeriod = (r.period || "").trim().toLowerCase() === revPeriod.trim().toLowerCase();
+        const matchAmount = Math.abs(Number(r.amount) - Number(revAmount)) < 10;
+        if (matchOwner && matchPeriod && matchAmount) return false;
+      }
+      return true;
+    });
     localStorage.setItem("gestimmo_reversements", JSON.stringify(historical));
 
+    // 3. Invalidate DB cache & reload data
+    invalidateDatabaseCache();
     setAnnulerModal(null);
     await loadData();
   };
 
   // --- Ouvrir la modale de reversement ---
   const openReverserModal = (row?: any) => {
-    const d = loadAllData();
-    setRawData(d);
+    const d = rawData.owners.length > 0 ? rawData : loadAllData();
+    if (rawData.owners.length === 0) setRawData(d);
 
     let ownerId = row?.ownerId;
 
@@ -528,9 +635,9 @@ export default function ReversementsPage() {
     }
 
     // Reporter le filtre Période/Mois si actif ou depuis la ligne
-    const targetPeriod = (row?.period && row.period !== "Tous les mois" && row.period !== "—" && row.period !== "En cours") 
+    const targetPeriod = (row?.period && !isAllPeriods(row.period) && row.period !== "—" && row.period !== "En cours") 
       ? row.period 
-      : (periodFilter && periodFilter !== "Tous les mois" ? periodFilter : "__TOUTES__");
+      : (periodFilter && !isAllPeriods(periodFilter) ? periodFilter : "__TOUTES__");
 
     setSelPeriod(targetPeriod);
 
@@ -550,17 +657,79 @@ export default function ReversementsPage() {
   };
 
   // --- Ouvrir la modale du Bilan imprimable ---
-  const openBilanModal = (row: any) => {
-    const d = loadAllData();
-    setRawData(d);
-
-    const ownerObj = d.owners.find((o: any) => o.id === row.ownerId) || { name: row.owner };
-    const eligibleGerants = getGerantsForOwner(ownerObj.name, d.biens, d.logements, d.gerants);
+  const openBilanModal = async (row: any) => {
+    const isDbActive = isSupabaseConfigured();
+    if (isDbActive && typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("gestimmo_reversements");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            const cleaned = parsed.filter((r: any) => !String(r.id || "").startsWith("R-"));
+            localStorage.setItem("gestimmo_reversements", JSON.stringify(cleaned));
+          }
+        }
+      } catch (e) {}
+    }
 
     setBilanPeriod(row.period !== "—" && row.period !== "En cours" ? row.period : "__TOUTES__");
     setBilanBien("__TOUS__");
-    setBilanGerant(eligibleGerants[0] ? `${eligibleGerants[0].name} (${eligibleGerants[0].role})` : "__TOUS__");
+    setBilanGerant("__TOUS__");
     setBilanModal(row);
+
+    const dbState = await loadAllDataFromDatabase();
+    if (dbState) {
+      buildRows({
+        owners: dbState.owners,
+        biens: dbState.properties,
+        logements: dbState.units,
+        paiements: syncPaymentsWithLeases(dbState.payments, dbState.leases),
+        historicalRev: dbState.payouts,
+        gerants: dbState.profiles && dbState.profiles.length > 0
+          ? dbState.profiles.map((p) => ({ id: p.id, name: p.full_name, role: p.role }))
+          : initialManagers,
+        baux: dbState.leases,
+        locataires: dbState.tenants,
+      });
+    }
+  };
+
+  // --- Ouvrir la modale d'Historique des reversements ---
+  const openHistoriqueModal = async (rowOrOwner: any) => {
+    const isDbActive = isSupabaseConfigured();
+    if (isDbActive && typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("gestimmo_reversements");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            const cleaned = parsed.filter((r: any) => !String(r.id || "").startsWith("R-"));
+            localStorage.setItem("gestimmo_reversements", JSON.stringify(cleaned));
+          }
+        }
+      } catch (e) {}
+    }
+
+    setHistPeriodFilter("__TOUTES__");
+    setHistBienFilter("__TOUS__");
+    setHistGerantFilter("__TOUS__");
+    setHistoriqueModal(rowOrOwner);
+
+    const dbState = await loadAllDataFromDatabase();
+    if (dbState) {
+      buildRows({
+        owners: dbState.owners,
+        biens: dbState.properties,
+        logements: dbState.units,
+        paiements: syncPaymentsWithLeases(dbState.payments, dbState.leases),
+        historicalRev: dbState.payouts,
+        gerants: dbState.profiles && dbState.profiles.length > 0
+          ? dbState.profiles.map((p) => ({ id: p.id, name: p.full_name, role: p.role }))
+          : initialManagers,
+        baux: dbState.leases,
+        locataires: dbState.tenants,
+      });
+    }
   };
 
   // --- Calculs contextuels en cascade pour reversements ---
@@ -642,9 +811,9 @@ export default function ReversementsPage() {
     new Set([
       ...periodsWithPayments,
       ...periodsWithRev,
-      ...(selPeriod && selPeriod !== "__TOUTES__" ? [selPeriod] : [])
+      ...(selPeriod && !isAllPeriods(selPeriod) ? [selPeriod] : [])
     ])
-  ).filter((p) => p && p !== "—" && p !== "En cours" && p !== "Tous les mois" && p !== "__TOUTES__") as string[];
+  ).filter((p) => p && p !== "—" && p !== "En cours" && !isAllPeriods(p)) as string[];
 
   const availablePeriodsModal = dynamicPerimeterPeriods.length > 0
     ? dynamicPerimeterPeriods
@@ -691,18 +860,19 @@ export default function ReversementsPage() {
   const commissionSel = cleanValSel(totalCollectedSel * (selOwnerRate / 100));
   const netToOwnerSel = cleanValSel(totalCollectedSel * ((100 - selOwnerRate) / 100));
 
-  const dejaReverseForPeriod = cleanValSel(perimeterHistoricalRev
-    .filter(
-      (r: any) =>
-        r.status === "EFFECTUÉ" &&
-        (selPeriod === "__TOUTES__" || (r.period && selPeriod && r.period.trim().toLowerCase() === selPeriod.trim().toLowerCase()))
-    )
-    .reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0));
+  const seenPerimeterRevKeys = new Set<string>();
+  const dedupedPerimeterRevs = perimeterHistoricalRev.filter((r: any) => {
+    if (r.status !== "EFFECTUÉ") return false;
+    if (selPeriod !== "__TOUTES__" && (r.period || "").trim().toLowerCase() !== selPeriod.trim().toLowerCase()) return false;
+    const k = r.id || `${r.period}-${r.amount}-${r.reference || ''}-${r.date || ''}`;
+    if (seenPerimeterRevKeys.has(k)) return false;
+    seenPerimeterRevKeys.add(k);
+    return true;
+  });
+  const dejaReverseForPeriod = cleanValSel(dedupedPerimeterRevs.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0));
 
   const soldePeriod = Math.max(0, netToOwnerSel - dejaReverseForPeriod);
   const autoAmount = reverserForm.typeVersement === "SOLDE_TOTAL" ? String(soldePeriod) : reverserForm.amount;
-
-
 
   const handleConfirmReverser = async () => {
     const targetOwnerObj = rawData.owners.find((o: any) =>
@@ -716,16 +886,35 @@ export default function ReversementsPage() {
     const amountNum = parseInt(String(autoAmount).replace(/\D/g, ""), 10) || 0;
     if (amountNum <= 0 || !finalOwnerId) return;
 
-    const storedRev = localStorage.getItem("gestimmo_reversements");
-    let historical: any[] = storedRev ? JSON.parse(storedRev) : initialReversements;
-
     const dateLabel = new Date(reverserForm.date + "T00:00:00")
       .toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
       .replace(/^./, (c) => c.toUpperCase());
 
+    const periodMonth = selPeriod !== "__TOUTES__" ? selPeriod : dateLabel;
+
+    // 1. Create in Supabase if available and retrieve the real UUID
+    const dbOwnerId = finalOwnerId && !finalOwnerId.startsWith("O-") ? finalOwnerId : null;
+    let createdPayoutId: string | null = null;
+    if (isSupabaseConfigured()) {
+      const created = await createPayout({
+        owner_id: dbOwnerId,
+        period_month: periodMonth,
+        gross_amount: totalCollectedSel || amountNum,
+        agency_commission: commissionSel || 0,
+        repairs_deduction: 0,
+        net_amount: amountNum || 0,
+        payment_method: (reverserForm.method || "VIREMENT BANCAIRE").toUpperCase(),
+      }).catch(console.error);
+      if (created && (created as any).id) {
+        createdPayoutId = (created as any).id;
+      }
+    }
+
+    const finalRevId = createdPayoutId || `R-${Math.floor(1000 + Math.random() * 9000)}`;
+
     const newRev = {
-      id: `R-${Math.floor(1000 + Math.random() * 9000)}`,
-      period: selPeriod !== "__TOUTES__" ? selPeriod : dateLabel,
+      id: finalRevId,
+      period: periodMonth,
       owner: (targetOwnerName || "").toUpperCase(),
       ownerId: finalOwnerId,
       bien: selBienName !== "__TOUS__" ? selBienName.toUpperCase() : "Tous les biens",
@@ -747,29 +936,22 @@ export default function ReversementsPage() {
       isDynamic: false,
     };
 
-    if (amountNum >= soldePeriod) {
-      historical = historical.map((r: any) =>
-        (r.ownerId === finalOwnerId || (r.owner && targetOwnerName && r.owner.trim().toUpperCase() === targetOwnerName.trim().toUpperCase())) && r.status === "EN ATTENTE"
-          ? { ...r, status: "EFFECTUÉ" }
-          : r
-      );
-    }
-    historical.push(newRev);
+    const storedRev = localStorage.getItem("gestimmo_reversements");
+    let historical: any[] = storedRev ? JSON.parse(storedRev) : initialReversements;
 
+    // Remove any previous pending record or same ID record to avoid duplicate
+    historical = historical.filter((r: any) => {
+      if (r.id === finalRevId) return false;
+      const isSameOwnerMatch = r.ownerId === finalOwnerId || (r.owner && targetOwnerName && r.owner.trim().toUpperCase() === targetOwnerName.trim().toUpperCase());
+      const isSamePeriod = (r.period || "").trim().toLowerCase() === periodMonth.trim().toLowerCase();
+      if (isSameOwnerMatch && isSamePeriod && r.status === "EN ATTENTE") return false;
+      return true;
+    });
+
+    historical.push(newRev);
     localStorage.setItem("gestimmo_reversements", JSON.stringify(historical));
 
-    // Save to Supabase DB if available
-    const dbOwnerId = finalOwnerId && !finalOwnerId.startsWith("O-") ? finalOwnerId : null;
-    await createPayout({
-      owner_id: dbOwnerId,
-      period_month: selPeriod !== "__TOUTES__" ? selPeriod : dateLabel,
-      gross_amount: totalCollectedSel || 0,
-      agency_commission: commissionSel || 0,
-      repairs_deducted: 0,
-      net_amount: amountNum || 0,
-      payment_method: (reverserForm.method || "VIREMENT BANCAIRE").toUpperCase(),
-    }).catch(console.error);
-
+    invalidateDatabaseCache();
     setReverserOpen(false);
     await loadData();
   };
@@ -813,12 +995,22 @@ export default function ReversementsPage() {
 
   const isMatchLogement = (p: any, l: any) => {
     if (!p || !l) return false;
-    const pUnit = (p.unit || p.logementId || p.logement || "").trim().toUpperCase();
+
+    // Direct match on unitId / unit_id
+    if (p.unitId && l.id && String(p.unitId).trim().toUpperCase() === String(l.id).trim().toUpperCase()) return true;
+    if (p.unit_id && l.id && String(p.unit_id).trim().toUpperCase() === String(l.id).trim().toUpperCase()) return true;
+
+    const pUnit = (p.unit || p.logementId || p.logement || p.unit_number || "").trim().toUpperCase();
     const lId = (l.id || "").trim().toUpperCase();
     const lName = (l.name || "").trim().toUpperCase();
+    const lUnit = (l.unit || "").trim().toUpperCase();
+    const lUnitNumber = (l.unit_number || "").trim().toUpperCase();
 
-    // Match direct par ID de logement ou Nom d'appartement
-    if (pUnit && (pUnit === lId || pUnit === lName)) return true;
+    // Match direct par ID de logement ou Nom d'appartement ou Numéro d'unité
+    if (pUnit && (pUnit === lId || pUnit === lName || pUnit === lUnit || pUnit === lUnitNumber)) return true;
+
+    // Normalisation "Studio M2" / "M2"
+    if (lUnitNumber && (pUnit.endsWith(lUnitNumber) || pUnit.includes(lUnitNumber))) return true;
 
     // Match par bien et locataire
     const pProp = (p.property || p.bien || "").trim().toUpperCase();
@@ -835,13 +1027,14 @@ export default function ReversementsPage() {
       const lease = rawData.baux?.find((b: any) =>
         (b.logementId && l.id && b.logementId.trim().toUpperCase() === l.id.trim().toUpperCase()) ||
         (b.unit && l.id && b.unit.trim().toUpperCase() === l.id.trim().toUpperCase()) ||
-        (b.unit && l.name && b.unit.trim().toUpperCase() === l.name.trim().toUpperCase())
+        (b.unit && l.name && b.unit.trim().toUpperCase() === l.name.trim().toUpperCase()) ||
+        (b.unitId && l.id && b.unitId.trim().toUpperCase() === l.id.trim().toUpperCase())
       );
       if (lease) {
         const leaseTenant = (lease.tenant || lease.locataire || "").trim().toUpperCase();
         if (pTenant && leaseTenant && pTenant === leaseTenant) return true;
         const leaseUnit = (lease.unit || lease.logementId || "").trim().toUpperCase();
-        if (pUnit && leaseUnit && pUnit === leaseUnit) return true;
+        if (pUnit && leaseUnit && (pUnit === leaseUnit || pUnit.includes(leaseUnit) || leaseUnit.includes(pUnit))) return true;
       }
     }
 
@@ -887,7 +1080,7 @@ export default function ReversementsPage() {
   const periodsFromRev = ownerBilanRev.map((r: any) => r.period).filter(Boolean);
 
   const rawBilanPeriods = Array.from(new Set([...periodsFromPaiements, ...periodsFromRev])).filter(
-    (p) => p && p !== "—" && p !== "En cours" && p !== "Tous les mois" && p !== "__TOUTES__"
+    (p) => p && p !== "—" && p !== "En cours" && !isAllPeriods(p)
   ) as string[];
 
   const availableBilanPeriods = rawBilanPeriods.length > 0
@@ -940,47 +1133,141 @@ export default function ReversementsPage() {
     };
   });
 
-  // Historique des reversements effectues pour le Bilan
-  const bilanHistoricalRev = rawData.historicalRev.filter((r: any) => {
+  const hasDbPayoutsInApp = rawData.historicalRev.some((other: any) => other.id && !String(other.id).startsWith("R-") && !String(other.id).startsWith("R-DYN-"));
+
+  // Reversements effectues pour le Bilan (uniquement ceux de la période affichée, hors cautions)
+  const rawBilanHistoricalRev = rawData.historicalRev.filter((r: any) => {
     // 1. Owner match (par ID ou par nom de propriétaire)
     const matchOwner = 
       (bilanModal?.ownerId && r.ownerId === bilanModal.ownerId) ||
-      (r.owner && currBilanOwner?.name && r.owner.trim().toUpperCase() === currBilanOwner.name.trim().toUpperCase());
+      (currBilanOwner?.id && r.ownerId === currBilanOwner.id) ||
+      (r.owner && currBilanOwner?.name && r.owner.trim().toUpperCase() === currBilanOwner.name.trim().toUpperCase()) ||
+      (r.owner && bilanModal?.owner && r.owner.trim().toUpperCase() === bilanModal.owner.trim().toUpperCase());
     if (!matchOwner) return false;
 
     // 2. Statut (EFFECTUÉ / EFFECTUE)
     const rStatus = (r.status || "").trim().toUpperCase();
     if (rStatus !== "EFFECTUÉ" && rStatus !== "EFFECTUE") return false;
 
-    // 3. Période
+    // 3. Écarter les enregistrements fantômes R- locaux quand Supabase est actif
+    if (hasDbPayoutsInApp && String(r.id || "").startsWith("R-")) {
+      return false;
+    }
+
+    // 4. Période : Ne comptabiliser que les reversements correspondant strictement à la période affichée
     if (bilanPeriod !== "__TOUTES__") {
       const rPeriod = (r.period || "").trim().toLowerCase();
       const bPeriod = bilanPeriod.trim().toLowerCase();
       if (rPeriod !== bPeriod) return false;
     }
 
-    // 4. Bien
+    // 5. Bien
     if (bilanBien !== "__TOUS__") {
-      const rBien = (r.bien || "").trim().toUpperCase();
+      const rBien = (r.bien || r.property || "").trim().toUpperCase();
       const bBien = bilanBien.trim().toUpperCase();
-      if (rBien !== "TOUS LES BIENS" && rBien !== bBien && rBien !== "") return false;
+      if (rBien !== "TOUS LES BIENS" && rBien !== "MULTI-BIENS" && rBien !== bBien && rBien !== "") return false;
     }
 
-    // 5. Gérant / Manager
-    if (bilanGerant !== "__TOUS__") {
-      const targetGerantName = (selectedGerantObj?.name || bilanGerant.split('(')[0]).trim().toUpperCase();
+    // 6. Gérant / Manager (ne filtre que si un gérant spécifique NON-ADMIN est sélectionné)
+    if (bilanGerant !== "__TOUS__" && selectedGerantObj && selectedGerantObj.role !== "Super Admin") {
+      const targetGerantName = (selectedGerantObj.name || bilanGerant.split('(')[0]).trim().toUpperCase();
       const rGerant = (r.gerant || "").trim().toUpperCase();
-      if (targetGerantName && rGerant && !rGerant.includes(targetGerantName) && !targetGerantName.includes(rGerant)) return false;
+      if (rGerant && targetGerantName && !rGerant.includes(targetGerantName) && !targetGerantName.includes(rGerant)) return false;
     }
 
+    return true;
+  });
+
+  const seenBilanRevKeys = new Set<string>();
+  const bilanHistoricalRev = rawBilanHistoricalRev.filter((r: any) => {
+    const k = r.id || `${r.period}-${r.amount}-${r.reference || ''}-${r.date || ''}`;
+    if (seenBilanRevKeys.has(k)) return false;
+    seenBilanRevKeys.add(k);
     return true;
   });
 
   const totalBilanCollected = bilanPaiements.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
   const totalBilanCommission = totalBilanCollected * (bilanOwnerRate / 100);
   const netBilanToOwner = totalBilanCollected * ((100 - bilanOwnerRate) / 100);
-  const totalBilanPaid = bilanHistoricalRev.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
+  const rawBilanPaid = bilanHistoricalRev.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
+  const totalBilanPaid = netBilanToOwner > 0 ? Math.min(netBilanToOwner, rawBilanPaid) : rawBilanPaid;
   const soldeBilan = Math.max(0, netBilanToOwner - totalBilanPaid);
+
+  // --- Données et filtres pour la modale dédiée d'Historique des Reversements ---
+  const currHistOwner = rawData.owners.find((o: any) =>
+    (o.id && historiqueModal?.ownerId && String(o.id).trim().toUpperCase() === String(historiqueModal.ownerId).trim().toUpperCase()) ||
+    (o.id && historiqueModal?.id && String(o.id).trim().toUpperCase() === String(historiqueModal.id).trim().toUpperCase()) ||
+    (o.name && historiqueModal?.owner && o.name.trim().toUpperCase() === historiqueModal.owner.trim().toUpperCase()) ||
+    (o.name && historiqueModal?.name && o.name.trim().toUpperCase() === historiqueModal.name.trim().toUpperCase())
+  ) || { id: historiqueModal?.ownerId || historiqueModal?.id, name: historiqueModal?.owner || historiqueModal?.name, code: "PR-100", phone: "-", email: "-" };
+
+  const rawHistOwnerReversements = rawData.historicalRev.filter((r: any) => {
+    const matchOwner =
+      (currHistOwner?.id && r.ownerId === currHistOwner.id) ||
+      (r.owner && currHistOwner?.name && r.owner.trim().toUpperCase() === currHistOwner.name.trim().toUpperCase()) ||
+      (historiqueModal?.ownerId && r.ownerId === historiqueModal.ownerId) ||
+      (historiqueModal?.owner && r.owner && r.owner.trim().toUpperCase() === historiqueModal.owner.trim().toUpperCase());
+    if (!matchOwner) return false;
+
+    const rStatus = (r.status || "").trim().toUpperCase();
+    if (rStatus !== "EFFECTUÉ" && rStatus !== "EFFECTUE") return false;
+
+    // Écarter formellement les résidus R- si Supabase contient les reversements réels
+    if (hasDbPayoutsInApp && String(r.id || "").startsWith("R-")) {
+      return false;
+    }
+
+    if (histPeriodFilter !== "__TOUTES__") {
+      const rPeriod = (r.period || "").trim().toLowerCase();
+      const bPeriod = histPeriodFilter.trim().toLowerCase();
+      if (rPeriod !== bPeriod) return false;
+    }
+
+    if (histBienFilter !== "__TOUS__") {
+      const rBien = (r.bien || r.property || "").trim().toUpperCase();
+      const bBien = histBienFilter.trim().toUpperCase();
+      if (rBien !== "TOUS LES BIENS" && rBien !== "MULTI-BIENS" && rBien !== bBien && rBien !== "") return false;
+    }
+
+    if (histGerantFilter !== "__TOUS__") {
+      const targetGerant = histGerantFilter.split('(')[0].trim().toUpperCase();
+      const rGerant = (r.gerant || "").trim().toUpperCase();
+      if (rGerant && targetGerant && !rGerant.includes(targetGerant) && !targetGerant.includes(rGerant)) return false;
+    }
+
+    return true;
+  });
+
+  const seenHistRevKeys = new Set<string>();
+  const histOwnerReversements = rawHistOwnerReversements.filter((r: any) => {
+    const k = r.id || `${r.period}-${r.amount}-${r.reference || ''}-${r.date || ''}`;
+    if (seenHistRevKeys.has(k)) return false;
+    seenHistRevKeys.add(k);
+    return true;
+  });
+
+  const totalHistPaid = histOwnerReversements.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
+
+  const rawHistPeriods = Array.from(new Set(
+    rawData.historicalRev
+      .filter((r: any) =>
+        (currHistOwner?.id && r.ownerId === currHistOwner.id) ||
+        (r.owner && currHistOwner?.name && r.owner.trim().toUpperCase() === currHistOwner.name.trim().toUpperCase())
+      )
+      .filter((r: any) => {
+        if (hasDbPayoutsInApp && String(r.id || "").startsWith("R-")) return false;
+        return true;
+      })
+      .map((r: any) => r.period)
+      .filter(Boolean)
+  )) as string[];
+
+  const histBiens = rawData.biens.filter((b: any) =>
+    (b.owner && currHistOwner?.name && b.owner.trim().toUpperCase() === currHistOwner.name.trim().toUpperCase()) ||
+    (b.ownerId && currHistOwner?.id && String(b.ownerId) === String(currHistOwner.id))
+  );
+
+  const histGerants = getGerantsForOwner(currHistOwner?.name || "", rawData.biens, rawData.logements, rawData.gerants);
 
   // Périodes, Propriétaires, Biens et Logements disponibles pour les filtres principaux de la page
   const rawPeriods = [
@@ -988,7 +1275,7 @@ export default function ReversementsPage() {
     ...rawData.paiements.map((p: any) => p.period).filter(Boolean),
     ...rawData.historicalRev.map((r: any) => r.period).filter(Boolean),
     ...rows.map((r: any) => r.period).filter(Boolean)
-  ].filter((p) => p && p !== "—" && p !== "En cours" && p !== "Tous les mois" && p !== "__TOUTES__");
+  ].filter((p) => p && p !== "—" && p !== "En cours" && !isAllPeriods(p));
 
   const availablePeriods = Array.from(new Set(rawPeriods)).sort((a, b) => parsePeriodSort(a) - parsePeriodSort(b));
 
@@ -1051,7 +1338,7 @@ export default function ReversementsPage() {
     ).values()
   );
 
-  const filtered = rows
+  const mappedRows = rows
     .map((r) => {
       const rate = r.validRate !== undefined && r.validRate !== null && !isNaN(Number(r.validRate)) ? Number(r.validRate) : 10;
 
@@ -1083,7 +1370,7 @@ export default function ReversementsPage() {
         const pUnit = (p.unit || p.logementId || "").trim().toUpperCase();
         const pProp = (p.property || p.bien || "").trim().toUpperCase();
 
-        const matchPeriod = periodFilter === "Tous les mois" || (pPeriod && pPeriod === periodFilter.trim().toLowerCase());
+        const matchPeriod = isAllPeriods(periodFilter) || (pPeriod && pPeriod === periodFilter.trim().toLowerCase());
         if (!matchPeriod) return false;
 
         if (bienFilter !== "Tous les biens") {
@@ -1109,25 +1396,13 @@ export default function ReversementsPage() {
           : rounded;
       };
 
-      const rawCollected = ownerPaiements.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
-      let collected = cleanVal(rawCollected);
-      if ((collected === 0 || isNaN(collected)) && r.collected) {
-        collected = cleanVal(Number(r.collected));
-      }
-      if (collected === 1540000 || collected === 1120000) {
-        collected = 1680000;
-      }
-
-      const commission = cleanVal(collected * (rate / 100));
-      const netToOwner = cleanVal(collected * ((100 - rate) / 100));
-
-      // 4. Reversements effectués matching the filters strictly
+      const seenEffKeys = new Set<string>();
       const effectues = rawData.historicalRev.filter((rev: any) => {
         const matchOwner = (rev.ownerId && r.ownerId && rev.ownerId === r.ownerId) ||
           (rev.owner && r.owner && rev.owner.trim().toUpperCase() === r.owner.trim().toUpperCase());
         if (!matchOwner || rev.status !== "EFFECTUÉ") return false;
 
-        const matchPeriod = periodFilter === "Tous les mois" || (rev.period && rev.period.trim().toLowerCase() === periodFilter.trim().toLowerCase());
+        const matchPeriod = isAllPeriods(periodFilter) || (rev.period && rev.period.trim().toLowerCase() === periodFilter.trim().toLowerCase());
         if (!matchPeriod) return false;
 
         if (bienFilter !== "Tous les biens") {
@@ -1142,11 +1417,81 @@ export default function ReversementsPage() {
           if (revLogementNorm && revLogementNorm !== targetLogementNorm && revLogementNorm !== "TOUS LES LOGEMENTS") return false;
         }
 
+        const k = rev.id || `${rev.period}-${rev.amount}-${rev.reference || ''}-${rev.date || ''}`;
+        if (seenEffKeys.has(k)) return false;
+        seenEffKeys.add(k);
         return true;
       });
 
-      const totalPaid = cleanVal(effectues.reduce((s: number, rev: any) => s + (Number(rev.amount) || 0), 0));
-      const amount = Math.max(0, netToOwner - totalPaid);
+      let collected = 0;
+      let totalPaid = 0;
+      let amount = 0;
+      let pendingPeriodsList: string[] = [];
+
+      if (isAllPeriods(periodFilter)) {
+        const ownerPeriods = Array.from(new Set([
+          ...ownerPaiements.map((p: any) => p.period).filter(Boolean),
+          ...rawData.historicalRev.filter((rev: any) => {
+            const matchOwner = (rev.ownerId && r.ownerId && rev.ownerId === r.ownerId) ||
+              (rev.owner && r.owner && rev.owner.trim().toUpperCase() === r.owner.trim().toUpperCase());
+            return matchOwner && rev.status === "EFFECTUÉ";
+          }).map((rev: any) => rev.period).filter(Boolean)
+        ])).filter((p: string) => p && p !== "—" && !isAllPeriods(p));
+
+        ownerPeriods.forEach((per: string) => {
+          const pPays = ownerPaiements.filter((p: any) => (p.period || "").trim().toLowerCase() === per.trim().toLowerCase());
+          const pColl = cleanVal(pPays.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0));
+          const pNet = cleanVal(pColl * ((100 - rate) / 100));
+
+          const pRevs = rawData.historicalRev.filter((rev: any) => {
+            const matchOwner = (rev.ownerId && r.ownerId && rev.ownerId === r.ownerId) ||
+              (rev.owner && r.owner && rev.owner.trim().toUpperCase() === r.owner.trim().toUpperCase());
+            if (!matchOwner || rev.status !== "EFFECTUÉ") return false;
+            return (rev.period || "").trim().toLowerCase() === per.trim().toLowerCase();
+          });
+
+          // Déduplication stricte des reversements
+          const seenKeys = new Set<string>();
+          const dedupedRevs = pRevs.filter((rev: any) => {
+            const k = rev.id || `${rev.period}-${rev.amount}-${rev.reference || ''}-${rev.date || ''}`;
+            if (seenKeys.has(k)) return false;
+            seenKeys.add(k);
+            return true;
+          });
+
+          const pRawPaid = cleanVal(dedupedRevs.reduce((s: number, rev: any) => s + (Number(rev.amount) || 0), 0));
+          // Règle d'or : un montant est reversé une et une seule fois ! Le total payé pour une période est plafonné au net dû.
+          const pPaid = pNet > 0 ? Math.min(pNet, pRawPaid) : pRawPaid;
+          const pBal = Math.max(0, pNet - pPaid);
+
+          collected += pColl;
+          totalPaid += pPaid;
+          amount += pBal;
+          if (pBal > 0) {
+            pendingPeriodsList.push(per);
+          }
+        });
+
+        if (collected === 0 && r.collected) {
+          collected = cleanVal(Number(r.collected));
+          const netToOwner = cleanVal(collected * ((100 - rate) / 100));
+          const dedupedEffectues = effectues.filter((rev: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.id === rev.id) === i);
+          const rawPaid = cleanVal(dedupedEffectues.reduce((s: number, rev: any) => s + (Number(rev.amount) || 0), 0));
+          totalPaid = netToOwner > 0 ? Math.min(netToOwner, rawPaid) : rawPaid;
+          amount = Math.max(0, netToOwner - totalPaid);
+        }
+      } else {
+        const rawCollected = ownerPaiements.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+        collected = cleanVal(rawCollected);
+        const netToOwner = cleanVal(collected * ((100 - rate) / 100));
+        const dedupedEffectues = effectues.filter((rev: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.id === rev.id) === i);
+        const rawPaid = cleanVal(dedupedEffectues.reduce((s: number, rev: any) => s + (Number(rev.amount) || 0), 0));
+        totalPaid = netToOwner > 0 ? Math.min(netToOwner, rawPaid) : rawPaid;
+        amount = Math.max(0, netToOwner - totalPaid);
+      }
+
+      const commission = cleanVal(collected * (rate / 100));
+      const netToOwner = cleanVal(collected * ((100 - rate) / 100));
 
       // Activity is true only if rents were collected OR payouts were actually made for this filter selection
       const hasActivity = collected > 0 || totalPaid > 0;
@@ -1160,14 +1505,11 @@ export default function ReversementsPage() {
         }
       }
 
-      const sortedFilteredPaiements = [...ownerPaiements].sort((a: any, b: any) =>
-        (b.date || b.payment_date || "").localeCompare(a.date || a.payment_date || "")
-      );
-      const latestFilteredPeriod = sortedFilteredPaiements[0]?.period || sortedFilteredPaiements[0]?.period_month;
-
-      const displayPeriod = periodFilter !== "Tous les mois"
+      const displayPeriod = !isAllPeriods(periodFilter)
         ? periodFilter
-        : (latestFilteredPeriod || (r.period && r.period !== "Tous les mois" ? r.period : "Septembre 2026"));
+        : (pendingPeriodsList.length > 0
+            ? (pendingPeriodsList.length === 1 ? pendingPeriodsList[0] : `${pendingPeriodsList[0]} (+${pendingPeriodsList.length - 1})`)
+            : (hasActivity ? (amount < 1 ? "Toutes les périodes" : "En cours") : "—"));
 
       return {
         ...r,
@@ -1181,29 +1523,125 @@ export default function ReversementsPage() {
         status,
         effectues,
       };
-    })
-    .filter((r) => {
-      const matchSearch = r.owner.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchStatus =
-        statusFilter === "Tous" ||
-        (statusFilter === "En attente" && r.status === "EN ATTENTE") ||
-        (statusFilter === "Effectués" && r.status === "EFFECTUÉ") ||
-        (statusFilter === "Aucun loyer" && r.status === "AUCUN LOYER");
-
-      let matchFilterBelonging = true;
-      if (bienFilter !== "Tous les biens") {
-        const ownerBiens = rawData.biens
-          .filter((b: any) => b.owner && b.owner.trim().toUpperCase() === r.owner.trim().toUpperCase())
-          .map((b: any) => b.name.trim().toUpperCase());
-        const targetBien = bienFilter.trim().toUpperCase();
-        matchFilterBelonging = ownerBiens.includes(targetBien) || r.hasActivity;
-      }
-
-      return matchSearch && matchStatus && matchFilterBelonging;
     });
 
-  const totalEnAttente = filtered.reduce((s, r) => s + Math.max(0, r.amount), 0);
-  const totalEffectue = filtered.reduce((s, r) => s + (r.totalPaid || 0), 0);
+  const preFiltered = mappedRows.filter((r) => {
+    const matchSearch = r.owner.toLowerCase().includes(searchTerm.toLowerCase());
+    let matchFilterBelonging = true;
+    if (bienFilter !== "Tous les biens") {
+      const ownerBiens = rawData.biens
+        .filter((b: any) => b.owner && b.owner.trim().toUpperCase() === r.owner.trim().toUpperCase())
+        .map((b: any) => b.name.trim().toUpperCase());
+      const targetBien = bienFilter.trim().toUpperCase();
+      matchFilterBelonging = ownerBiens.includes(targetBien) || r.hasActivity;
+    }
+    return matchSearch && matchFilterBelonging;
+  });
+
+  const countAll = preFiltered.length;
+  const countPending = preFiltered.filter(r => r.amount > 0 || r.status === "EN ATTENTE").length;
+  const countEffectues = preFiltered.filter(r => r.status === "EFFECTUÉ" && r.amount < 1).length;
+  const countAucunLoyer = preFiltered.filter(r => r.status === "AUCUN LOYER").length;
+
+  const filtered = preFiltered.filter((r) => {
+    return (
+      statusFilter === "Tous" ||
+      (statusFilter === "En attente" && (r.status === "EN ATTENTE" || r.amount > 0)) ||
+      (statusFilter === "Effectués" && r.status === "EFFECTUÉ" && r.amount < 1) ||
+      (statusFilter === "Aucun loyer" && r.status === "AUCUN LOYER")
+    );
+  });
+
+  const totalEnAttente = preFiltered.reduce((s, r) => s + Math.max(0, r.amount), 0);
+  const totalEffectue = preFiltered.reduce((s, r) => s + (r.totalPaid || 0), 0);
+
+  // Liste exhaustive de tous les reversements non encore effectués (par propriétaire, bien et période)
+  const pendingItemsDetail = useMemo(() => {
+    const items: any[] = [];
+    const isSameOwner = (targetOwnerId: string, targetOwnerName: string, itemOwnerId?: string, itemOwnerName?: string) => {
+      const normTargetName = (targetOwnerName || "").trim().toUpperCase();
+      const normItemName = (itemOwnerName || "").trim().toUpperCase();
+      if (targetOwnerId && itemOwnerId && targetOwnerId === itemOwnerId) return true;
+      if (normTargetName && normItemName && normTargetName === normItemName) return true;
+      return false;
+    };
+
+    rawData.owners.forEach((owner: any) => {
+      if (!owner || owner.name === "Biens Propres") return;
+      const ownerRate = owner.commissionRate !== undefined && owner.commissionRate !== null ? Number(owner.commissionRate) : 10;
+      const validRate = isNaN(ownerRate) ? 10 : ownerRate;
+      const ownerBiens = rawData.biens.filter((b: any) =>
+        (b.owner && b.owner.trim().toUpperCase() === owner.name.trim().toUpperCase()) ||
+        (b.ownerId && String(b.ownerId) === String(owner.id))
+      );
+
+      const ownerPaiements = rawData.paiements.filter((p: any) =>
+        isPaymentForOwner(p, owner, rawData.biens, rawData.logements, rawData.baux)
+      );
+
+      const periods = Array.from(new Set(ownerPaiements.map((p: any) => p.period).filter(Boolean)))
+        .filter((per: string) => per && per !== "—" && !isAllPeriods(per));
+
+      periods.forEach((per: string) => {
+        const pPays = ownerPaiements.filter((p: any) => (p.period || "").trim().toLowerCase() === per.trim().toLowerCase());
+        const rawColl = pPays.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+        const cleanVal = (val: number) => {
+          const rounded = Math.round(val);
+          return Math.abs(rounded - Math.round(rounded / 1000) * 1000) < 10 ? Math.round(rounded / 1000) * 1000 : rounded;
+        };
+        const collected = cleanVal(rawColl);
+        const commission = cleanVal(collected * (validRate / 100));
+        const net = cleanVal(collected * ((100 - validRate) / 100));
+
+        const pRevs = rawData.historicalRev.filter((r: any) =>
+          isSameOwner(owner.id, owner.name, r.ownerId, r.owner) &&
+          r.status === "EFFECTUÉ" &&
+          (r.period || "").trim().toLowerCase() === per.trim().toLowerCase()
+        );
+        const seenPendingRevKeys = new Set<string>();
+        const dedupedPendingRevs = pRevs.filter((r: any) => {
+          const k = r.id || `${r.period}-${r.amount}-${r.reference || ''}-${r.date || ''}`;
+          if (seenPendingRevKeys.has(k)) return false;
+          seenPendingRevKeys.add(k);
+          return true;
+        });
+        const rawPaid = cleanVal(dedupedPendingRevs.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0));
+        const paid = net > 0 ? Math.min(net, rawPaid) : rawPaid;
+        const remaining = Math.max(0, net - paid);
+
+        if (remaining > 0) {
+          const biensInvolved = Array.from(new Set(pPays.map((p: any) => p.property || p.bien).filter(Boolean))).join(", ") || ownerBiens.map((b: any) => b.name).join(", ") || "Tous les biens";
+
+          items.push({
+            id: `PEND-${owner.id}-${per.replace(/\s+/g, '_')}`,
+            ownerId: owner.id,
+            owner: owner.name,
+            ownerCode: owner.code || `PR-${owner.id.slice(0, 6)}`,
+            period: per,
+            bien: biensInvolved,
+            rate: validRate,
+            collected,
+            commission,
+            net,
+            paid,
+            remaining,
+          });
+        }
+      });
+    });
+
+    return items;
+  }, [rawData]);
+
+  const filteredPendingItems = pendingItemsDetail.filter((item: any) => {
+    if (pendingModalOwnerFilter !== "__TOUS__" && item.owner !== pendingModalOwnerFilter) return false;
+    if (pendingModalPeriodFilter !== "__TOUTES__" && item.period !== pendingModalPeriodFilter) return false;
+    return true;
+  });
+
+  const totalPendingModalAmount = filteredPendingItems.reduce((s: number, it: any) => s + it.remaining, 0);
+  const totalPendingModalCollected = filteredPendingItems.reduce((s: number, it: any) => s + it.collected, 0);
+  const totalPendingModalCommission = filteredPendingItems.reduce((s: number, it: any) => s + it.commission, 0);
 
   useEffect(() => {
 
@@ -1215,6 +1653,66 @@ export default function ReversementsPage() {
     };
     initData();
   }, []);
+
+  const handleDownloadPDF = async (elementId: string, filename: string) => {
+    const element = document.getElementById(elementId);
+    if (!element) return;
+
+    const prevScrollTop = element.scrollTop;
+    element.scrollTop = 0;
+
+    try {
+      const html2pdf = (await import("html2pdf.js" as any)).default;
+      const opt = {
+        margin: [6, 8, 6, 8],
+        filename: filename,
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          scrollY: 0,
+          scrollX: 0,
+          onclone: (clonedDoc: Document) => {
+            const clonedEl = clonedDoc.getElementById(elementId);
+            if (clonedEl) {
+              clonedEl.style.overflow = "visible";
+              clonedEl.style.maxHeight = "none";
+              clonedEl.style.height = "auto";
+
+              // Déverrouiller tous les conteneurs parents dans le document cloné
+              let parent = clonedEl.parentElement;
+              while (parent && parent !== clonedDoc.body) {
+                parent.style.overflow = "visible";
+                parent.style.maxHeight = "none";
+                parent.style.height = "auto";
+                parent = parent.parentElement;
+              }
+            }
+          },
+        },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        pagebreak: { mode: ["avoid-all", "css", "legacy"] },
+      };
+
+      await html2pdf().set(opt).from(element).save();
+    } catch (err) {
+      console.error("Erreur téléchargement PDF :", err);
+    } finally {
+      element.scrollTop = prevScrollTop;
+    }
+  };
+
+  const handlePrintDocument = (elementId: string) => {
+    const element = document.getElementById(elementId);
+    if (element) element.scrollTop = 0;
+    const backdrop = element?.closest('[id$="-modal-backdrop"]') as HTMLElement | null;
+    if (backdrop) backdrop.scrollTop = 0;
+    const modalContent = element?.closest('[id$="-modal-content"]') as HTMLElement | null;
+    if (modalContent) modalContent.scrollTop = 0;
+    window.scrollTo(0, 0);
+    window.print();
+  };
 
   if (!can("paiements", "view")) {
 
@@ -1228,72 +1726,297 @@ export default function ReversementsPage() {
         @media print {
           @page {
             size: A4 portrait;
-            margin: 6mm;
+            margin: 8mm 10mm;
           }
-          body {
-            visibility: hidden !important;
+          html, body {
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
             background: white !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            font-size: 11px !important;
+            color: #111827 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
+          /* Masquer intégralement le tableau de bord principal et la navigation (hauteur 0px !) */
+          .no-print,
+          aside,
+          nav,
+          header {
+            display: none !important;
+          }
+          /* Déverrouiller tous les conteneurs parents Next.js pour éviter les contraintes de hauteur */
+          body > div,
+          body > div > div,
+          main,
+          main > div {
+            display: block !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: white !important;
+            border: none !important;
+            box-shadow: none !important;
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+          /* Réinitialiser les modales d'impression pour démarrer au tout début de la page 1 */
+          #printable-bilan-modal-backdrop,
+          #printable-bilan-modal-content,
+          #printable-historique-modal-backdrop,
+          #printable-historique-modal-content,
+          #printable-pending-modal-backdrop,
+          #printable-pending-modal-content {
+            position: static !important;
+            display: block !important;
+            overflow: visible !important;
+            max-height: none !important;
+            height: auto !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: white !important;
+            border: none !important;
+            box-shadow: none !important;
+            backdrop-filter: none !important;
+          }
+          /* Zones imprimables propres */
           #printable-bilan-area,
-          #printable-bilan-area * {
-            visibility: visible !important;
-          }
-          #printable-bilan-area {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
+          #printable-historique-area,
+          #printable-pending-area {
+            position: static !important;
+            display: block !important;
+            overflow: visible !important;
+            max-height: none !important;
+            height: auto !important;
             width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
-            color: black !important;
-          }
-          .no-print {
-            display: none !important;
+            color: #111827 !important;
           }
           .avoid-break {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
           }
+          table {
+            page-break-inside: auto !important;
+            break-inside: auto !important;
+          }
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          thead {
+            display: table-header-group !important;
+          }
+          tfoot {
+            display: table-footer-group !important;
+          }
         }
       `}</style>
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Wrapper no-print pour tout le tableau de bord principal afin de ne laisser aucun espace blanc lors de l'impression */}
+      <div className="no-print space-y-6">
+        {/* Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Reversements &amp; Relevés</h1>
           <p className="text-sm text-gray-500 mt-1">Générez les relevés de gérance, imprimez les bilans complets et effectuez les reversements aux propriétaires.</p>
         </div>
-        {can("paiements", "edit") && (
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Bouton de filtrage direct : Reversements non effectués */}
           <button
-            onClick={() => openReverserModal()}
-            disabled={rows.length === 0}
-            className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm w-fit disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => setStatusFilter(statusFilter === "En attente" ? "Tous" : "En attente")}
+            className={`px-3.5 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 shadow-sm border ${
+              statusFilter === "En attente"
+                ? "bg-orange-500 text-white border-orange-600 hover:bg-orange-600 ring-2 ring-orange-200"
+                : "bg-white text-orange-700 border-orange-200 hover:bg-orange-50"
+            }`}
+            title={statusFilter === "En attente" ? "Désactiver le filtre (afficher tous les reversements)" : "Filtrer pour n'afficher que les reversements non encore effectués"}
           >
-            <PlusCircle className="h-4 w-4" /> Nouveau reversement
+            <Clock className={`w-4 h-4 ${statusFilter === "En attente" ? "text-white" : "text-orange-500"}`} />
+            <span>{statusFilter === "En attente" ? "Tous les reversements" : "Reversements non effectués"}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${statusFilter === "En attente" ? "bg-white text-orange-700" : "bg-orange-100 text-orange-800"}`}>
+              {countPending}
+            </span>
           </button>
-        )}
+
+          {/* Bouton de visualisation détaillée : Visualiser les attentes */}
+          <button
+            onClick={() => {
+              setPendingModalOwnerFilter("__TOUS__");
+              setPendingModalPeriodFilter("__TOUTES__");
+              setPendingModalOpen(true);
+            }}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 shadow-sm"
+            title="Ouvrir le bordereau détaillé de tous les reversements non encore effectués"
+          >
+            <Eye className="w-4 h-4 text-white" />
+            <span>Visualiser les attentes</span>
+          </button>
+
+          {can("paiements", "edit") && (
+            <button
+              onClick={() => openReverserModal()}
+              disabled={rows.length === 0}
+              className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm w-fit disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <PlusCircle className="h-4 w-4" /> Nouveau reversement
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* KPI Cards (Cliquables comme filtres rapides) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-app-border shadow-sm">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Propriétaires suivis</p>
+        {/* Card 1: Propriétaires suivis */}
+        <div 
+          onClick={() => setStatusFilter("Tous")}
+          className={`bg-white p-5 rounded-2xl border transition-all cursor-pointer hover:shadow-md ${
+            statusFilter === "Tous" 
+              ? "border-primary/40 ring-2 ring-primary/20 bg-primary/5 shadow-sm" 
+              : "border-app-border hover:border-gray-400"
+          }`}
+          title="Cliquer pour afficher tous les propriétaires"
+        >
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Propriétaires suivis</p>
+            {statusFilter === "Tous" ? (
+              <span className="text-[10px] bg-gray-900 text-white px-2 py-0.5 rounded-full font-bold">Filtre actif</span>
+            ) : (
+              <span className="text-[10px] text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full">Tous</span>
+            )}
+          </div>
           <p className="text-2xl font-bold text-gray-900">{rows.length}</p>
         </div>
-        <div className="bg-white p-5 rounded-2xl border border-app-border shadow-sm">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">En attente de reversement</p>
+
+        {/* Card 2: En attente de reversement */}
+        <div 
+          onClick={() => setStatusFilter(statusFilter === "En attente" ? "Tous" : "En attente")}
+          className={`bg-white p-5 rounded-2xl border transition-all cursor-pointer hover:shadow-md relative overflow-hidden ${
+            statusFilter === "En attente" 
+              ? "ring-2 ring-orange-500 border-orange-500 bg-orange-50/50 shadow-sm" 
+              : "border-app-border hover:border-orange-300"
+          }`}
+          title={statusFilter === "En attente" ? "Cliquer pour désactiver le filtre" : "Cliquer pour filtrer les reversements non encore effectués"}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs text-gray-500 uppercase tracking-wider flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5 text-orange-500" /> En attente de reversement
+            </p>
+            {statusFilter === "En attente" ? (
+              <span className="text-[10px] bg-orange-500 text-white px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                <X className="w-2.5 h-2.5" /> Filtre actif
+              </span>
+            ) : (
+              <span className="text-[10px] text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full font-medium border border-orange-200">
+                🔍 Cliquer pour filtrer
+              </span>
+            )}
+          </div>
           <p className="text-2xl font-bold text-orange-500">{formatFCFA(totalEnAttente)}</p>
         </div>
-        <div className="bg-white p-5 rounded-2xl border border-app-border shadow-sm">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total reversé</p>
+
+        {/* Card 3: Total reversé */}
+        <div 
+          onClick={() => setStatusFilter(statusFilter === "Effectués" ? "Tous" : "Effectués")}
+          className={`bg-white p-5 rounded-2xl border transition-all cursor-pointer hover:shadow-md relative overflow-hidden ${
+            statusFilter === "Effectués" 
+              ? "ring-2 ring-green-500 border-green-500 bg-green-50/50 shadow-sm" 
+              : "border-app-border hover:border-green-300"
+          }`}
+          title={statusFilter === "Effectués" ? "Cliquer pour désactiver le filtre" : "Cliquer pour filtrer les reversements déjà effectués"}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs text-gray-500 uppercase tracking-wider flex items-center gap-1">
+              <CheckCircle className="w-3.5 h-3.5 text-green-600" /> Total reversé
+            </p>
+            {statusFilter === "Effectués" ? (
+              <span className="text-[10px] bg-green-600 text-white px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                <X className="w-2.5 h-2.5" /> Filtre actif
+              </span>
+            ) : (
+              <span className="text-[10px] text-green-600 bg-green-50 px-2 py-0.5 rounded-full font-medium border border-green-200">
+                🔍 Cliquer pour filtrer
+              </span>
+            )}
+          </div>
           <p className="text-2xl font-bold text-green-600">{formatFCFA(totalEffectue)}</p>
         </div>
       </div>
 
       {/* Main Table */}
       <div className="bg-white rounded-2xl border border-app-border shadow-sm overflow-hidden flex flex-col">
-        <div className="p-6 border-b border-app-border">
+        <div className="p-6 border-b border-app-border space-y-4">
+          
+          {/* Quick status tabs (Onglets d'accès direct) */}
+          <div className="flex flex-wrap items-center gap-2 pb-1 border-b border-gray-100">
+            <button
+              type="button"
+              onClick={() => setStatusFilter("Tous")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                statusFilter === "Tous"
+                  ? "bg-gray-900 text-white shadow-sm"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              Tous
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${statusFilter === "Tous" ? "bg-white/20 text-white" : "bg-gray-200 text-gray-700"}`}>
+                {countAll}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter("En attente")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                statusFilter === "En attente"
+                  ? "bg-orange-500 text-white shadow-sm ring-2 ring-orange-200"
+                  : "bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" /> En attente de reversement
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${statusFilter === "En attente" ? "bg-white text-orange-700" : "bg-orange-200 text-orange-800"}`}>
+                {countPending}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter("Effectués")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                statusFilter === "Effectués"
+                  ? "bg-green-600 text-white shadow-sm"
+                  : "bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+              }`}
+            >
+              <CheckCircle className="w-3.5 h-3.5" /> Effectués
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${statusFilter === "Effectués" ? "bg-white text-green-700" : "bg-green-200 text-green-800"}`}>{countEffectues}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter("Aucun loyer")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                statusFilter === "Aucun loyer"
+                  ? "bg-gray-600 text-white shadow-sm"
+                  : "bg-gray-50 text-gray-500 hover:bg-gray-100 border border-gray-200"
+              }`}
+            >
+              Aucun loyer
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${statusFilter === "Aucun loyer" ? "bg-white/20 text-white" : "bg-gray-200 text-gray-600"}`}>
+                {countAucunLoyer}
+              </span>
+            </button>
+          </div>
+
           <div className="flex flex-wrap items-center gap-2">
             {/* Filter 1: Propriétaire (Combobox: Dropdown style with live typing/search) */}
             <div className="relative min-w-[210px] max-w-[240px]">
@@ -1406,10 +2129,10 @@ export default function ReversementsPage() {
             {/* Filter 4: Période */}
             <select
               className="border border-app-border rounded-lg px-3 py-2 text-sm bg-white font-medium text-gray-700 outline-none focus:ring-2 focus:ring-primary/20"
-              value={periodFilter}
+              value={isAllPeriods(periodFilter) ? "Toutes les périodes" : periodFilter}
               onChange={(e) => setPeriodFilter(e.target.value)}
             >
-              <option value="Tous les mois">Tous les mois</option>
+              <option value="Toutes les périodes">Toutes les périodes</option>
               {availablePeriods.map((p) => (
                 <option key={p} value={p}>{p}</option>
               ))}
@@ -1479,12 +2202,21 @@ export default function ReversementsPage() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
                     <div className="flex items-center justify-end gap-2">
+                      {/* Bouton Historique des reversements */}
+                      <button
+                        onClick={() => openHistoriqueModal(row)}
+                        className="text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 transition-colors px-2.5 py-1.5 rounded-lg flex items-center shadow-sm"
+                        title="Consulter et imprimer l'historique des reversements"
+                      >
+                        <History className="w-3.5 h-3.5 mr-1 text-indigo-600" /> Historique
+                      </button>
+
                       {/* Bouton Bilan / Relevé imprimable */}
                       {row.hasActivity ? (
                         <button
                           onClick={() => openBilanModal(row)}
                           className="text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors px-3 py-1.5 rounded-lg flex items-center shadow-sm"
-                          title="Imprimer le bilan complet des reversements"
+                          title="Imprimer le relevé officiel de gérance"
                         >
                           <Printer className="w-3.5 h-3.5 mr-1.5 text-blue-600" /> Bilan
                         </button>
@@ -1535,6 +2267,7 @@ export default function ReversementsPage() {
           </table>
         </div>
       </div>
+      </div> {/* Fin du wrapper no-print pour le tableau de bord */}
 
       {/* ============================================================
           MODALE : BILAN IMPRIMABLE DU PROPRIÉTAIRE
@@ -1604,37 +2337,25 @@ export default function ReversementsPage() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={async () => {
-                      const element = document.getElementById("printable-bilan-area");
-                      if (!element) return;
-
-                      try {
-                        const html2pdf = (await import("html2pdf.js" as any)).default;
-                        await html2pdf()
-                          .set({
-                            margin: [6, 6, 6, 6],
-                            filename: `Releve-Gerance-${(currBilanOwner.name || 'Proprietaire').replace(/\s+/g, '_')}_${(bilanPeriod || 'Bilan').replace(/\s+/g, '_')}.pdf`,
-                            image: { type: 'jpeg', quality: 0.98 },
-                            html2canvas: { scale: 2, useCORS: true, logging: false },
-                            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                            pagebreak: { mode: ['css', 'legacy'] }
-                          })
-                          .from(element)
-                          .save();
-                      } catch (err) {
-                        console.error("PDF Export Error:", err);
-                      }
-                    }}
+                    onClick={() => handleDownloadPDF("printable-bilan-area", `Releve-Gerance-${(currBilanOwner.name || 'Proprietaire').replace(/\s+/g, '_')}_${(bilanPeriod || 'Bilan').replace(/\s+/g, '_')}.pdf`)}
                     className="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
                   >
                     <Download className="w-3.5 h-3.5" /> Télécharger PDF
                   </button>
                   <button
                     type="button"
-                    onClick={() => window.print()}
+                    onClick={() => handlePrintDocument("printable-bilan-area")}
                     className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
                   >
                     <Printer className="w-3.5 h-3.5" /> Imprimer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openHistoriqueModal(currBilanOwner)}
+                    className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+                    title="Consulter et imprimer l'historique complet des reversements"
+                  >
+                    <History className="w-3.5 h-3.5" /> Historique
                   </button>
                 </div>
 
@@ -1645,204 +2366,678 @@ export default function ReversementsPage() {
             </div>
 
             {/* DOCUMENT OFFICIEL POUR IMPRESSION */}
-            <div className="p-4 overflow-y-auto flex-1 bg-white text-gray-900" id="printable-bilan-area">
-              
-              {/* En-tête document officiel */}
-              <div className="flex justify-between items-start border-b-2 border-gray-900 pb-2 mb-2.5">
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-7 h-7 bg-primary rounded-lg flex items-center justify-center text-white font-black text-xs">G</div>
-                    <span className="text-xl font-black tracking-tight text-gray-900">GESTIMMO</span>
-                  </div>
-                  <p className="text-[10px] text-gray-500 mt-0.5">Gestion Immobilière &amp; Administration de Biens</p>
-                  <p className="text-[10px] text-gray-500">Abidjan, Côte d'Ivoire • Tél: +225 07 00 00 00 00 • contact@gestimmo.ci</p>
-                </div>
-                <div className="text-right">
-                  <span className="inline-block px-2.5 py-0.5 bg-gray-100 text-gray-900 font-extrabold text-[10px] uppercase tracking-wider rounded border border-gray-300">
-                    RELEVÉ OFFICIEL DE GÉRANCE
-                  </span>
-                  <p className="text-[10px] font-mono text-gray-500 mt-1">N° Document : BIL-2026-{currBilanOwner.id}-{new Date().toISOString().slice(0, 10).replace(/-/g, "")}</p>
-                  <p className="text-[10px] text-gray-600 mt-0.5">Date d'édition : <strong>{new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}</strong></p>
-                </div>
-              </div>
+            <div className="p-3.5 sm:p-5 overflow-y-auto flex-1 bg-white text-gray-900" id="printable-bilan-area" style={{ maxWidth: "100%" }}>
+              {(() => {
+                const cleanBilanOwnerCode = (currBilanOwner.code || (currBilanOwner.id ? `PR-${currBilanOwner.id.slice(0, 6).toUpperCase()}` : "PR-001")).toUpperCase();
+                const bilanRef = `BIL-2026-${cleanBilanOwnerCode}`;
+                return (
+                  <>
+                    {/* En-tête document officiel */}
+                    <div className="flex justify-between items-center border-b-2 border-gray-900 pb-3 mb-3">
+                      <div>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center text-white font-black text-sm shadow-sm flex-shrink-0">
+                            G
+                          </div>
+                          <div>
+                            <span className="text-xl font-black tracking-tight text-gray-900 block leading-tight">GESTIMMO</span>
+                            <span className="text-[9.5px] uppercase tracking-wider font-extrabold text-primary block leading-tight mt-0.5">Administration de Biens &amp; Gestion Immobilière</span>
+                          </div>
+                        </div>
+                        <p className="text-[9.5px] text-gray-500 mt-1 font-medium">Abidjan, Côte d'Ivoire • Tél: +225 07 00 00 00 00 • contact@gestimmo.ci</p>
+                      </div>
+                      <div className="text-right flex flex-col items-end">
+                        <span className="inline-flex items-center justify-center px-3.5 py-1 bg-gray-900 text-white font-black text-[11px] uppercase tracking-wider rounded-md shadow-xs leading-normal">
+                          RELEVÉ OFFICIEL DE GÉRANCE
+                        </span>
+                        <p className="text-[10px] font-mono text-gray-700 mt-1.5 font-bold tracking-tight">
+                          RÉF : <span className="text-gray-900 font-extrabold">{bilanRef}</span>
+                        </p>
+                        <p className="text-[9.5px] text-gray-500 mt-0.5">Édité le : <strong className="text-gray-900 font-semibold">{new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}</strong></p>
+                      </div>
+                    </div>
 
-              {/* Cartouches d'Informations */}
-              <div className="grid grid-cols-2 gap-3 mb-2.5 text-[11px]">
-                <div className="p-2.5 rounded-lg border border-gray-300 bg-gray-50/50 space-y-0.5">
-                  <p className="font-bold uppercase tracking-wider text-gray-500 text-[9px] mb-1 flex items-center gap-1">
-                    <Building2 className="w-3 h-3 text-gray-700" /> BÉNÉFICIAIRE / PROPRIÉTAIRE
-                  </p>
-                  <p className="text-xs font-black text-gray-900">{currBilanOwner.name}</p>
-                  <p className="text-gray-600"><span className="font-semibold">Code Propriétaire :</span> {currBilanOwner.code || currBilanOwner.id}</p>
-                  <p className="text-gray-600"><span className="font-semibold">Contact :</span> {currBilanOwner.phone || "-"} • {currBilanOwner.email || "-"}</p>
-                  <p className="text-gray-600 truncate"><span className="font-semibold">Biens rattachés :</span> {currBilanBiens.map((b: any) => b.name).join(", ") || "Aucun bien"}</p>
-                </div>
+                    {/* Cartouches d'Informations */}
+                    <div className="grid grid-cols-2 gap-3 mb-3 text-[10px]">
+                      <div className="p-2.5 rounded-xl border border-gray-300 bg-gray-50/70 space-y-1">
+                        <div className="flex items-center justify-between border-b border-gray-200 pb-1 mb-1">
+                          <p className="font-extrabold uppercase tracking-wider text-gray-600 text-[9px] flex items-center gap-1.5">
+                            <Building2 className="w-3.5 h-3.5 text-primary" /> BÉNÉFICIAIRE / PROPRIÉTAIRE
+                          </p>
+                          <span className="text-[9px] font-mono font-bold bg-white px-2 py-0.5 rounded border border-gray-200 text-gray-700 shadow-2xs">
+                            {cleanBilanOwnerCode}
+                          </span>
+                        </div>
+                        <p className="text-xs font-black text-gray-900 leading-snug">{currBilanOwner.name}</p>
+                        <p className="text-gray-600 leading-snug"><span className="font-semibold text-gray-700">Contact :</span> {currBilanOwner.phone || "-"} • {currBilanOwner.email || "-"}</p>
+                        <p className="text-gray-600 leading-snug truncate" title={currBilanBiens.map((b: any) => b.name).join(", ")}>
+                          <span className="font-semibold text-gray-700">Biens :</span> {currBilanBiens.map((b: any) => b.name).join(", ") || "Aucun bien"}
+                        </p>
+                      </div>
 
-                <div className="p-2.5 rounded-lg border border-gray-300 bg-gray-50/50 space-y-0.5">
-                  <p className="font-bold uppercase tracking-wider text-gray-500 text-[9px] mb-1 flex items-center gap-1">
-                    <UserCheck className="w-3 h-3 text-gray-700" /> GÉRANT ET PÉRIODE DE RÉFÉRENCE
-                  </p>
-                  <p className="text-xs font-black text-gray-900">{bilanGerant === "__TOUS__" ? "Tous les gérants du propriétaire" : bilanGerant}</p>
-                  <p className="text-gray-600"><span className="font-semibold">Période concernée :</span> <span className="font-bold text-gray-900">{bilanPeriod === "__TOUTES__" ? "Toutes les périodes (Cumul)" : bilanPeriod}</span></p>
-                  <p className="text-gray-600"><span className="font-semibold">Taux Commission Gérance :</span> {bilanOwnerRate}% sur les loyers encaissés</p>
-                  <p className="text-gray-600"><span className="font-semibold">Statut global :</span> <span className="font-bold uppercase">{soldeBilan === 0 ? "Réglé / Solde Zéro" : "Solde Restant en Attente"}</span></p>
-                </div>
-              </div>
+                      <div className="p-2.5 rounded-xl border border-gray-300 bg-gray-50/70 space-y-1">
+                        <div className="flex items-center justify-between border-b border-gray-200 pb-1 mb-1">
+                          <p className="font-extrabold uppercase tracking-wider text-gray-600 text-[9px] flex items-center gap-1.5">
+                            <UserCheck className="w-3.5 h-3.5 text-primary" /> PÉRIODE &amp; COMPTABILITÉ GÉRANCE
+                          </p>
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase ${soldeBilan === 0 ? "bg-green-100 text-green-800" : "bg-orange-100 text-orange-800"}`}>
+                            {soldeBilan === 0 ? "Solde Réglé" : "Solde en Attente"}
+                          </span>
+                        </div>
+                        <p className="text-gray-700 leading-snug"><span className="font-semibold text-gray-700">Gérant :</span> <span className="font-bold text-gray-900">{bilanGerant === "__TOUS__" ? "Tous les gérants du propriétaire" : bilanGerant}</span></p>
+                        <p className="text-gray-700 leading-snug"><span className="font-semibold text-gray-700">Période :</span> <span className="font-bold text-gray-900">{bilanPeriod === "__TOUTES__" ? "Toutes les périodes (Cumul global)" : bilanPeriod}</span></p>
+                        <p className="text-gray-700 leading-snug"><span className="font-semibold text-gray-700">Honoraires Agence :</span> <span className="font-bold text-gray-900">{bilanOwnerRate}%</span> sur loyers collectés</p>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
 
               {/* TABLEAU 1 : DÉTAIL DES LOYERS COLLECTÉS PAR BIEN ET APPARTEMENT */}
               <div className="mb-2.5">
-                <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-gray-800 mb-1.5 border-b border-gray-300 pb-0.5 flex items-center justify-between">
-                  <span>1. Détail des Loyers Encaissés par Appartement &amp; Bien</span>
-                  <span className="text-[9px] font-normal text-gray-500 lowercase">({bilanLogementsBreakdown.length} appartement(s) affiché(s))</span>
-                </h3>
+                <div className="flex items-center justify-between border-b border-gray-300 pb-0.5 mb-1">
+                  <h3 className="text-[10px] font-black uppercase tracking-wider text-gray-800 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block"></span>
+                    Détail des Loyers Encaissés par Appartement &amp; Bien
+                  </h3>
+                  <span className="text-[8.5px] font-semibold text-gray-500 uppercase tracking-wider">
+                    {bilanLogementsBreakdown.length} appartement(s)
+                  </span>
+                </div>
 
-                <div className="overflow-x-auto w-full">
-                  <table className="w-full text-left text-[11px] border-collapse border border-gray-300 min-w-[600px]">
+                <div className="w-full overflow-hidden rounded border border-gray-300">
+                  <table className="w-full text-left text-[9.5px] border-collapse" style={{ tableLayout: "fixed" }}>
                     <thead>
-                      <tr className="bg-gray-100 text-gray-700 uppercase font-bold text-[9px] border-b border-gray-300">
-                        <th className="py-1 px-2 border-r border-gray-300">Appartement</th>
-                        <th className="py-1 px-2 border-r border-gray-300">Bien d'appartenance</th>
-                        <th className="py-1 px-2 border-r border-gray-300">Locataire</th>
-                        <th className="py-1 px-2 text-center border-r border-gray-300">Loyer Collecté</th>
-                        <th className="py-1 px-2 text-center border-r border-gray-300">Frais Gérance ({bilanOwnerRate}%)</th>
-                        <th className="py-1 px-2 text-right">Net Dû Propriétaire</th>
+                      <tr className="bg-gray-100 text-gray-700 uppercase font-bold text-[8.5px] border-b border-gray-300">
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "14%" }}>Appartement</th>
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "26%" }}>Bien d'appartenance</th>
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "24%" }}>Locataire</th>
+                        <th className="py-1 px-2 text-right border-r border-gray-300 whitespace-nowrap" style={{ width: "12%" }}>Loyer Collecté</th>
+                        <th className="py-1 px-2 text-right border-r border-gray-300 whitespace-nowrap" style={{ width: "11%" }}>Honoraires ({bilanOwnerRate}%)</th>
+                        <th className="py-1 px-2 text-right whitespace-nowrap" style={{ width: "13%" }}>Net Dû</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {bilanLogementsBreakdown.length > 0 ? (
                         bilanLogementsBreakdown.map((item: any) => (
                           <tr key={item.id} className="hover:bg-gray-50">
-                            <td className="py-1 px-2 font-bold text-gray-900 border-r border-gray-200">{formatUnitDisplay(item.name || item.unit || item.id)}</td>
-                            <td className="py-1 px-2 text-gray-600 border-r border-gray-200">{item.bien}</td>
-                            <td className="py-1 px-2 font-medium text-gray-900 border-r border-gray-200">{item.tenant}</td>
-                            <td className="py-1 px-2 text-center font-semibold text-gray-900 border-r border-gray-200">
+                            <td className="py-0.5 px-2 font-bold text-gray-900 border-r border-gray-200 truncate">{formatUnitDisplay(item.name || item.unit || item.id)}</td>
+                            <td className="py-0.5 px-2 text-gray-600 border-r border-gray-200 truncate" title={item.bien}>{item.bien}</td>
+                            <td className="py-0.5 px-2 font-medium text-gray-900 border-r border-gray-200 truncate" title={item.tenant}>{item.tenant}</td>
+                            <td className="py-0.5 px-2 text-right font-semibold text-gray-900 border-r border-gray-200 whitespace-nowrap">
                               {item.collected > 0 ? formatFCFA(item.collected) : <span className="text-gray-400">0 F CFA</span>}
                             </td>
-                             <td className="py-1 px-2 text-center font-medium text-red-600 border-r border-gray-200">
+                            <td className="py-0.5 px-2 text-right font-medium text-red-600 border-r border-gray-200 whitespace-nowrap">
                               {item.commission > 0 ? `-${formatFCFA(item.commission)}` : item.collected > 0 ? "0 F CFA" : <span className="text-gray-400">—</span>}
-                             </td>
-                             <td className="py-1 px-2 text-right font-bold text-gray-900">
-                               {item.net > 0 ? formatFCFA(item.net) : <span className="text-gray-400">0 F CFA</span>}
-                             </td>
-                           </tr>
-                         ))
-                       ) : (
-                         <tr>
-                           <td colSpan={6} className="py-2 px-2 text-center text-gray-400 italic">Aucun appartement ne correspond aux critères choisis pour ce gérant.</td>
-                         </tr>
-                       )}
-                     </tbody>
-                     <tfoot>
-                       <tr className="bg-gray-100 font-extrabold text-[11px] text-gray-900 border-t-2 border-gray-400">
-                         <td colSpan={3} className="py-1 px-2 uppercase text-right border-r border-gray-300">Totaux Encaissés :</td>
-                         <td className="py-1 px-2 text-center border-r border-gray-300">{formatFCFA(totalBilanCollected)}</td>
-                         <td className="py-1 px-2 text-center text-red-600 border-r border-gray-300">{totalBilanCommission > 0 ? `-${formatFCFA(totalBilanCommission)}` : "0 F CFA"}</td>
-                         <td className="py-1 px-2 text-right text-gray-900 font-bold">{formatFCFA(netBilanToOwner)}</td>
-                       </tr>
-                     </tfoot>
-                   </table>
-                 </div>
-               </div>
+                            </td>
+                            <td className="py-0.5 px-2 text-right font-bold text-gray-900 whitespace-nowrap">
+                              {item.net > 0 ? formatFCFA(item.net) : <span className="text-gray-400">0 F CFA</span>}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="py-2 px-2 text-center text-gray-400 italic">Aucun appartement ne correspond aux critères choisis pour ce gérant.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-100 font-black text-[9.5px] text-gray-900 border-t-2 border-gray-400">
+                        <td colSpan={3} className="py-1 px-2 uppercase text-right border-r border-gray-300 font-black">Totaux Encaissés :</td>
+                        <td className="py-1 px-2 text-right font-black border-r border-gray-300 whitespace-nowrap">{formatFCFA(totalBilanCollected)}</td>
+                        <td className="py-1 px-2 text-right font-black text-red-600 border-r border-gray-300 whitespace-nowrap">{totalBilanCommission > 0 ? `-${formatFCFA(totalBilanCommission)}` : "0 F CFA"}</td>
+                        <td className="py-1 px-2 text-right font-black text-gray-900 whitespace-nowrap">{formatFCFA(netBilanToOwner)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
 
-               {/* TABLEAU 2 : HISTORIQUE DES REVERSEMENTS ET GÉRANTS */}
-               <div className="mb-2.5">
-                 <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-gray-800 mb-1.5 border-b border-gray-300 pb-0.5 flex items-center justify-between">
-                   <span>2. Historique des Versements / Reversements Comptabilisés</span>
-                   <span className="text-[9px] font-normal text-gray-500 lowercase">({bilanHistoricalRev.length} versement(s))</span>
-                 </h3>
-
-                 <div className="overflow-x-auto w-full">
-                   <table className="w-full text-left text-[11px] border-collapse border border-gray-300 min-w-[600px]">
-                     <thead>
-                       <tr className="bg-gray-100 text-gray-700 uppercase font-bold text-[9px] border-b border-gray-300">
-                         <th className="py-1 px-2 border-r border-gray-300">N° Réf</th>
-                         <th className="py-1 px-2 border-r border-gray-300">Date Versement</th>
-                         <th className="py-1 px-2 border-r border-gray-300">Période / Bien</th>
-                         <th className="py-1 px-2 border-r border-gray-300">Mode &amp; Référence</th>
-                         <th className="py-1 px-2 border-r border-gray-300">Gérant Émetteur</th>
-                         <th className="py-1 px-2 text-right">Montant Reversé</th>
-                       </tr>
-                     </thead>
-                   <tbody className="divide-y divide-gray-200">
-                     {bilanHistoricalRev.length > 0 ? (
-                       bilanHistoricalRev.map((r: any) => (
-                         <tr key={r.id} className="hover:bg-gray-50">
-                           <td className="py-1 px-2 font-mono font-bold text-gray-900 border-r border-gray-200">{r.id}</td>
-                           <td className="py-1 px-2 text-gray-700 border-r border-gray-200">{r.date || "-"}</td>
-                           <td className="py-1 px-2 text-gray-700 border-r border-gray-200">{r.period} {r.bien && r.bien !== "Tous les biens" ? `(${r.bien})` : ""}</td>
-                           <td className="py-1 px-2 text-gray-700 border-r border-gray-200">
-                             {r.method || "Virement"} {r.reference ? `• Ref: ${r.reference}` : ""}
-                           </td>
-                           <td className="py-1 px-2 text-gray-700 border-r border-gray-200 font-medium">{r.gerant || bilanGerant}</td>
-                           <td className="py-1 px-2 text-right font-extrabold text-green-700">{formatFCFA(r.amount)}</td>
-                         </tr>
-                       ))
-                     ) : (
-                       <tr>
-                         <td colSpan={6} className="py-2 px-2 text-center text-gray-400 italic">Aucun reversement encore effectué pour cette sélection.</td>
-                       </tr>
-                     )}
-                   </tbody>
-                   <tfoot>
-                     <tr className="bg-gray-100 font-extrabold text-[11px] text-gray-900 border-t-2 border-gray-400">
-                       <td colSpan={5} className="py-1 px-2 uppercase text-right border-r border-gray-300">Total Déjà Reversé au Propriétaire :</td>
-                       <td className="py-1 px-2 text-right text-green-700 font-bold">-{formatFCFA(totalBilanPaid)}</td>
-                     </tr>
-                   </tfoot>
-                 </table>
-               </div>
-             </div>
-
-               {/* RECAPITULATIF FINANCIER GLOBAL ET SOLDE */}
-               <div className="p-2.5 rounded-lg border-2 border-gray-900 bg-gray-50 mb-2.5 space-y-1 text-xs avoid-break">
-                 <div className="flex justify-between text-gray-700">
-                   <span>Loyers Brut Encaissés :</span>
-                   <span className="font-bold text-gray-900">{formatFCFA(totalBilanCollected)}</span>
-                 </div>
-                 <div className="flex justify-between text-red-600">
-                   <span>Honoraires &amp; Frais de Gérance ({bilanOwnerRate}%) :</span>
-                   <span className="font-bold">{totalBilanCommission > 0 ? `-${formatFCFA(totalBilanCommission)}` : "0 F CFA"}</span>
-                 </div>
-                <div className="flex justify-between font-bold text-gray-900 border-t border-gray-300 pt-1">
+              {/* RECAPITULATIF FINANCIER GLOBAL ET SOLDE */}
+              <div className="p-2.5 rounded-lg border-2 border-gray-900 bg-gray-50/80 mb-2.5 space-y-1 text-[10.5px] avoid-break">
+                <div className="flex justify-between items-center text-gray-700">
+                  <span>Loyers Brut Encaissés :</span>
+                  <span className="font-bold text-gray-900 whitespace-nowrap">{formatFCFA(totalBilanCollected)}</span>
+                </div>
+                <div className="flex justify-between items-center text-red-600">
+                  <span>Honoraires &amp; Frais de Gérance ({bilanOwnerRate}%) :</span>
+                  <span className="font-bold whitespace-nowrap">{totalBilanCommission > 0 ? `-${formatFCFA(totalBilanCommission)}` : "0 F CFA"}</span>
+                </div>
+                <div className="flex justify-between items-center font-bold text-gray-900 border-t border-gray-300 pt-1">
                   <span>Net Total Dû au Propriétaire :</span>
-                  <span>{formatFCFA(netBilanToOwner)}</span>
+                  <span className="whitespace-nowrap">{formatFCFA(netBilanToOwner)}</span>
                 </div>
-                <div className="flex justify-between text-green-700 pb-0.5">
-                  <span>Montant Total Déjà Reversé :</span>
-                  <span className="font-bold">-{formatFCFA(totalBilanPaid)}</span>
-                </div>
-                <div className="flex justify-between items-center font-black bg-white p-2 rounded border-2 border-gray-900 text-xs sm:text-sm">
+                {totalBilanPaid > 0 && (
+                  <div className="flex justify-between items-center text-green-700 pb-0.5">
+                    <span>Montant Déjà Reversé (pour cette période) :</span>
+                    <span className="font-bold whitespace-nowrap">-{formatFCFA(totalBilanPaid)}</span>
+                  </div>
+                )}
+                <div className={`flex justify-between items-center font-black p-2 rounded border-2 ${soldeBilan > 0 ? "border-amber-600 bg-amber-50" : "border-green-600 bg-green-50"} text-[11px] sm:text-xs`}>
                   <span className="uppercase tracking-wider">SOLDE RESTANT À REVERSER :</span>
-                  <span className={soldeBilan > 0 ? "text-orange-600" : "text-green-600"}>
+                  <span className={`text-xs sm:text-sm whitespace-nowrap ${soldeBilan > 0 ? "text-amber-700 font-black" : "text-green-700 font-black"}`}>
                     {formatFCFA(soldeBilan)}
                   </span>
                 </div>
               </div>
 
               {/* BLOC DE SIGNATURES OFFICIELLES */}
-              <div className="grid grid-cols-2 gap-6 pt-2 border-t border-gray-300 text-[11px] avoid-break">
-                <div className="text-center space-y-4">
+              <div className="grid grid-cols-2 gap-8 pt-2 border-t border-gray-300 text-[9.5px] avoid-break">
+                <div className="text-center space-y-2">
                   <div>
-                    <p className="font-extrabold uppercase tracking-wider text-gray-900">Pour le Gérant / L'Agence</p>
-                    <p className="text-[9px] text-gray-500">{bilanGerant === "__TOUS__" ? "L'Administration GESTIMMO" : bilanGerant}</p>
+                    <p className="font-black uppercase tracking-wider text-gray-900">Pour le Gérant / L'Agence</p>
+                    <p className="text-[8.5px] text-gray-500 font-medium">{bilanGerant === "__TOUS__" ? (ownerEligibleGerants[0] ? `${ownerEligibleGerants[0].name} (${ownerEligibleGerants[0].role})` : "L'Administration GESTIMMO") : bilanGerant}</p>
                   </div>
-                  <div className="border-b border-dashed border-gray-400 w-3/4 mx-auto pb-0.5">
-                    <span className="text-[9px] text-gray-400 italic">Signature &amp; Cachet officiel</span>
+                  <div className="border-b border-dashed border-gray-400 w-2/3 mx-auto pb-0.5">
+                    <span className="text-[8px] text-gray-400 italic">Signature &amp; Cachet officiel</span>
                   </div>
                 </div>
 
-                <div className="text-center space-y-4">
+                <div className="text-center space-y-2">
                   <div>
-                    <p className="font-extrabold uppercase tracking-wider text-gray-900">Le Propriétaire / Le Mandant</p>
-                    <p className="text-[9px] text-gray-500">{currBilanOwner.name}</p>
+                    <p className="font-black uppercase tracking-wider text-gray-900">Le Propriétaire / Le Mandant</p>
+                    <p className="text-[8.5px] text-gray-500 font-medium">{currBilanOwner.name}</p>
                   </div>
-                  <div className="border-b border-dashed border-gray-400 w-3/4 mx-auto pb-0.5">
-                    <span className="text-[9px] text-gray-400 italic">Mention "Bon pour accord / Reçu le..." &amp; Signature</span>
+                  <div className="border-b border-dashed border-gray-400 w-2/3 mx-auto pb-0.5">
+                    <span className="text-[8px] text-gray-400 italic">Mention "Bon pour accord / Reçu le..." &amp; Signature</span>
                   </div>
                 </div>
               </div>
 
             </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================
+          MODALE : HISTORIQUE DÉDIÉ DES REVERSEMENTS DU PROPRIÉTAIRE
+          ============================================================ */}
+      {historiqueModal && (
+        <div id="printable-historique-modal-backdrop" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto" onClick={() => setHistoriqueModal(null)}>
+          <div id="printable-historique-modal-content" className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl border border-app-border flex flex-col max-h-[92vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            
+            {/* Header Modale Historique */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-app-border bg-gray-50 no-print">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
+                  <History className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Historique des Reversements</h2>
+                  <p className="text-xs text-gray-500">Propriétaire : <strong className="text-gray-900">{currHistOwner.name}</strong></p>
+                </div>
+              </div>
+
+              {/* Filtres d'impression de l'historique */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1">
+                  <label className="text-xs font-semibold text-gray-600">Période :</label>
+                  <select
+                    className="border border-app-border rounded-lg px-2.5 py-1.5 text-xs bg-white text-gray-900 font-medium outline-none"
+                    value={histPeriodFilter}
+                    onChange={(e) => setHistPeriodFilter(e.target.value)}
+                  >
+                    <option value="__TOUTES__">Toutes les périodes</option>
+                    {rawHistPeriods.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <label className="text-xs font-semibold text-gray-600">Bien :</label>
+                  <select
+                    className="border border-app-border rounded-lg px-2.5 py-1.5 text-xs bg-white text-gray-900 font-medium outline-none max-w-[180px] truncate"
+                    value={histBienFilter}
+                    onChange={(e) => setHistBienFilter(e.target.value)}
+                  >
+                    <option value="__TOUS__">Tous les biens</option>
+                    {histBiens.map((b: any) => (
+                      <option key={b.id || b.name} value={b.name}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <label className="text-xs font-semibold text-gray-600">Gérant :</label>
+                  <select
+                    className="border border-app-border rounded-lg px-2.5 py-1.5 text-xs bg-white text-gray-900 font-medium outline-none"
+                    value={histGerantFilter}
+                    onChange={(e) => setHistGerantFilter(e.target.value)}
+                  >
+                    <option value="__TOUS__">Tous les gérants</option>
+                    {histGerants.map((g: any) => (
+                      <option key={g.id} value={`${g.name} (${g.role})`}>{g.name} ({g.role})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadPDF("printable-historique-area", `Historique-Reversements-${(currHistOwner.name || 'Proprietaire').replace(/\s+/g, '_')}_${(histPeriodFilter || 'Global').replace(/\s+/g, '_')}.pdf`)}
+                    className="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Télécharger PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintDocument("printable-historique-area")}
+                    className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Printer className="w-3.5 h-3.5" /> Imprimer
+                  </button>
+                </div>
+
+                <button onClick={() => setHistoriqueModal(null)} className="text-gray-400 hover:text-gray-700 ml-2">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* DOCUMENT OFFICIEL HISTORIQUE POUR IMPRESSION */}
+            <div className="p-3.5 sm:p-5 overflow-y-auto flex-1 bg-white text-gray-900" id="printable-historique-area" style={{ maxWidth: "100%" }}>
+              {(() => {
+                const cleanHistOwnerCode = (currHistOwner.code || (currHistOwner.id ? `PR-${currHistOwner.id.slice(0, 6).toUpperCase()}` : "PR-001")).toUpperCase();
+                const histRef = `HIST-2026-${cleanHistOwnerCode}`;
+                return (
+                  <>
+                    {/* En-tête document officiel */}
+                    <div className="flex justify-between items-center border-b-2 border-gray-900 pb-3 mb-3">
+                      <div>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-sm flex-shrink-0">
+                            G
+                          </div>
+                          <div>
+                            <span className="text-xl font-black tracking-tight text-gray-900 block leading-tight">GESTIMMO</span>
+                            <span className="text-[9.5px] uppercase tracking-wider font-extrabold text-indigo-600 block leading-tight mt-0.5">Historique &amp; Relevé des Versements Effectués</span>
+                          </div>
+                        </div>
+                        <p className="text-[9.5px] text-gray-500 mt-1 font-medium">Abidjan, Côte d'Ivoire • Tél: +225 07 00 00 00 00 • contact@gestimmo.ci</p>
+                      </div>
+                      <div className="text-right flex flex-col items-end">
+                        <span className="inline-flex items-center justify-center px-3.5 py-1 bg-gray-900 text-white font-black text-[11px] uppercase tracking-wider rounded-md shadow-xs leading-normal">
+                          HISTORIQUE DES VERSEMENTS
+                        </span>
+                        <p className="text-[10px] font-mono text-gray-700 mt-1.5 font-bold tracking-tight">
+                          RÉF : <span className="text-gray-900 font-extrabold">{histRef}</span>
+                        </p>
+                        <p className="text-[9.5px] text-gray-500 mt-0.5">Édité le : <strong className="text-gray-900 font-semibold">{new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}</strong></p>
+                      </div>
+                    </div>
+
+                    {/* Cartouches d'Informations */}
+                    <div className="grid grid-cols-2 gap-3 mb-3 text-[10px]">
+                      <div className="p-2.5 rounded-xl border border-gray-300 bg-gray-50/70 space-y-1">
+                        <div className="flex items-center justify-between border-b border-gray-200 pb-1 mb-1">
+                          <p className="font-extrabold uppercase tracking-wider text-gray-600 text-[9px] flex items-center gap-1.5">
+                            <Building2 className="w-3.5 h-3.5 text-indigo-600" /> BÉNÉFICIAIRE / PROPRIÉTAIRE
+                          </p>
+                          <span className="text-[9px] font-mono font-bold bg-white px-2 py-0.5 rounded border border-gray-200 text-gray-700 shadow-2xs">
+                            {cleanHistOwnerCode}
+                          </span>
+                        </div>
+                        <p className="text-xs font-black text-gray-900 leading-snug">{currHistOwner.name}</p>
+                        <p className="text-gray-600 leading-snug"><span className="font-semibold text-gray-700">Contact :</span> {currHistOwner.phone || "-"} • {currHistOwner.email || "-"}</p>
+                        <p className="text-gray-600 leading-snug">
+                          <span className="font-semibold text-gray-700">Biens :</span> {histBiens.map((b: any) => b.name).join(", ") || "Tous les biens"}
+                        </p>
+                      </div>
+
+                      <div className="p-2.5 rounded-xl border border-gray-300 bg-gray-50/70 space-y-1">
+                        <div className="flex items-center justify-between border-b border-gray-200 pb-1 mb-1">
+                          <p className="font-extrabold uppercase tracking-wider text-gray-600 text-[9px] flex items-center gap-1.5">
+                            <UserCheck className="w-3.5 h-3.5 text-indigo-600" /> CRITÈRES &amp; FILTRES SÉLECTIONNÉS
+                          </p>
+                          <span className="text-[9px] font-bold px-2 py-0.5 rounded uppercase bg-indigo-100 text-indigo-800">
+                            {histOwnerReversements.length} versement(s)
+                          </span>
+                        </div>
+                        <p className="text-gray-700 leading-snug"><span className="font-semibold text-gray-700">Période :</span> <span className="font-bold text-gray-900">{histPeriodFilter === "__TOUTES__" ? "Toutes les périodes (Cumul)" : histPeriodFilter}</span></p>
+                        <p className="text-gray-700 leading-snug"><span className="font-semibold text-gray-700">Périmètre Bien :</span> <span className="font-bold text-gray-900">{histBienFilter === "__TOUS__" ? "Tous les biens du propriétaire" : histBienFilter}</span></p>
+                        <p className="text-gray-700 leading-snug"><span className="font-semibold text-gray-700">Gérant Émetteur :</span> <span className="font-bold text-gray-900">{histGerantFilter === "__TOUS__" ? "Tous les gérants" : histGerantFilter}</span></p>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+
+              {/* TABLEAU : HISTORIQUE DES REVERSEMENTS */}
+              <div className="mb-2.5">
+                <div className="w-full overflow-hidden rounded border border-gray-300">
+                  <table className="w-full text-left text-[9.5px] border-collapse" style={{ tableLayout: "fixed" }}>
+                    <thead>
+                      <tr className="bg-gray-100 text-gray-700 uppercase font-bold text-[8.5px] border-b border-gray-300">
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "11%" }}>N° Réf</th>
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "13%" }}>Date Versement</th>
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "22%" }}>Période / Objet</th>
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "23%" }}>Mode &amp; Référence</th>
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "17%" }}>Gérant Émetteur</th>
+                        <th className="py-1 px-2 text-right whitespace-nowrap" style={{ width: "14%" }}>Montant Reversé</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {histOwnerReversements.length > 0 ? (
+                        histOwnerReversements.map((r: any) => (
+                          <tr key={r.id} className="hover:bg-gray-50">
+                            <td className="py-1 px-2 font-mono font-bold text-gray-900 border-r border-gray-200">
+                              {r.id && r.id.length > 20 ? r.id.slice(0, 8).toUpperCase() : r.id}
+                            </td>
+                            <td className="py-1 px-2 text-gray-700 border-r border-gray-200 whitespace-nowrap">
+                              {r.date && r.date !== "-" ? (r.date.includes("-") ? new Date(r.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : r.date) : "—"}
+                            </td>
+                            <td className="py-1 px-2 text-gray-700 border-r border-gray-200">
+                              <div className="font-semibold text-gray-900 leading-tight">{r.period}</div>
+                              {r.bien && r.bien !== "Tous les biens" && (
+                                <div className="text-[8.5px] text-gray-500 leading-tight mt-0.5">{r.bien}</div>
+                              )}
+                            </td>
+                            <td className="py-1 px-2 text-gray-700 border-r border-gray-200">
+                              <div className="font-medium text-gray-900 leading-tight">{r.method || r.payment_method || "Virement"}</div>
+                              {r.reference && r.reference !== "-" && (
+                                <div className="text-[8.5px] font-mono text-gray-500 leading-tight mt-0.5">Réf: {r.reference}</div>
+                              )}
+                            </td>
+                            <td className="py-1 px-2 text-gray-700 border-r border-gray-200 font-medium">
+                              <div className="leading-tight">{r.gerant && r.gerant !== "-" ? r.gerant : "Direction GESTIMMO"}</div>
+                            </td>
+                            <td className="py-1 px-2 text-right font-extrabold text-green-700 whitespace-nowrap">
+                              {formatFCFA(r.amount)}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="py-4 px-2 text-center text-gray-400 italic">Aucun versement n'a encore été enregistré pour ces critères.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-100 font-black text-[10px] text-gray-900 border-t-2 border-gray-400">
+                        <td colSpan={5} className="py-1.5 px-2 uppercase text-right border-r border-gray-300 font-black">Total Général Reversé :</td>
+                        <td className="py-1.5 px-2 text-right text-green-700 font-black whitespace-nowrap">{formatFCFA(totalHistPaid)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              {/* RECAPITULATIF HISTORIQUE */}
+              <div className="p-2 rounded-lg border border-gray-300 bg-gray-50 mb-3 flex items-center justify-between text-xs avoid-break">
+                <span className="font-bold text-gray-700 uppercase tracking-wide">Cumul des Versements Enregistrés :</span>
+                <span className="font-black text-sm text-green-700">{formatFCFA(totalHistPaid)}</span>
+              </div>
+
+              {/* BLOC DE SIGNATURES OFFICIELLES */}
+              <div className="grid grid-cols-2 gap-8 pt-2 border-t border-gray-300 text-[9.5px] avoid-break">
+                <div className="text-center space-y-3">
+                  <div>
+                    <p className="font-black uppercase tracking-wider text-gray-900">Pour le Gérant / L'Agence</p>
+                    <p className="text-[8.5px] text-gray-500 font-medium">L'Administration GESTIMMO</p>
+                  </div>
+                  <div className="border-b border-dashed border-gray-400 w-2/3 mx-auto pb-0.5">
+                    <span className="text-[8px] text-gray-400 italic">Signature &amp; Cachet officiel</span>
+                  </div>
+                </div>
+
+                <div className="text-center space-y-3">
+                  <div>
+                    <p className="font-black uppercase tracking-wider text-gray-900">Le Propriétaire / Le Mandant</p>
+                    <p className="text-[8.5px] text-gray-500 font-medium">{currHistOwner.name}</p>
+                  </div>
+                  <div className="border-b border-dashed border-gray-400 w-2/3 mx-auto pb-0.5">
+                    <span className="text-[8px] text-gray-400 italic">Mention "Bon pour accord / Reçu le..." &amp; Signature</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================
+          MODALE : BORDEREAU DES REVERSEMENTS NON EFFECTUÉS / EN ATTENTE
+          ============================================================ */}
+      {pendingModalOpen && (
+        <div id="printable-pending-modal-backdrop" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto" onClick={() => setPendingModalOpen(false)}>
+          <div id="printable-pending-modal-content" className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl border border-app-border flex flex-col max-h-[92vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            
+            {/* Header Modale */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-app-border bg-gray-50 no-print">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center text-orange-600">
+                  <Clock className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Reversements Non Effectués</h2>
+                  <p className="text-xs text-gray-500">Loyers encaissés restant à reverser aux propriétaires</p>
+                </div>
+              </div>
+
+              {/* Filtres de la modale */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1">
+                  <label className="text-xs font-semibold text-gray-600">Propriétaire :</label>
+                  <select
+                    className="border border-app-border rounded-lg px-2.5 py-1.5 text-xs bg-white text-gray-900 font-medium outline-none max-w-[170px] truncate"
+                    value={pendingModalOwnerFilter}
+                    onChange={(e) => setPendingModalOwnerFilter(e.target.value)}
+                  >
+                    <option value="__TOUS__">Tous les propriétaires</option>
+                    {availableProprietaires.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <label className="text-xs font-semibold text-gray-600">Période :</label>
+                  <select
+                    className="border border-app-border rounded-lg px-2.5 py-1.5 text-xs bg-white text-gray-900 font-medium outline-none"
+                    value={pendingModalPeriodFilter}
+                    onChange={(e) => setPendingModalPeriodFilter(e.target.value)}
+                  >
+                    <option value="__TOUTES__">Toutes les périodes</option>
+                    {availablePeriods.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadPDF("printable-pending-area", `Bordereau-Reversements-En-Attente_${new Date().toISOString().slice(0, 10)}.pdf`)}
+                    className="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Télécharger PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintDocument("printable-pending-area")}
+                    className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Printer className="w-3.5 h-3.5" /> Imprimer
+                  </button>
+                </div>
+
+                <button onClick={() => setPendingModalOpen(false)} className="text-gray-400 hover:text-gray-700 ml-2">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Document imprimable */}
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-white text-gray-900" id="printable-pending-area" style={{ maxWidth: "100%" }}>
+              {(() => {
+                const pendingRef = `ATT-2026-${new Date().toISOString().slice(0, 10).replace(/-/g, "").slice(4)}`;
+                return (
+                  <>
+                    {/* En-tête document officiel */}
+                    <div className="flex justify-between items-center border-b-2 border-gray-900 pb-3 mb-3">
+                      <div>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 bg-orange-600 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-sm flex-shrink-0">
+                            G
+                          </div>
+                          <div>
+                            <span className="text-xl font-black tracking-tight text-gray-900 block leading-tight">GESTIMMO</span>
+                            <span className="text-[9.5px] uppercase tracking-wider font-extrabold text-orange-600 block leading-tight mt-0.5">Bordereau des Reversements en Attente de Règlement</span>
+                          </div>
+                        </div>
+                        <p className="text-[9.5px] text-gray-500 mt-1 font-medium">Abidjan, Côte d'Ivoire • Tél: +225 07 00 00 00 00 • contact@gestimmo.ci</p>
+                      </div>
+                      <div className="text-right flex flex-col items-end">
+                        <span className="inline-flex items-center justify-center px-3.5 py-1 bg-orange-600 text-white font-black text-[11px] uppercase tracking-wider rounded-md shadow-xs leading-normal">
+                          ÉTAT DES SOMMES EN ATTENTE
+                        </span>
+                        <p className="text-[10px] font-mono text-gray-700 mt-1.5 font-bold tracking-tight">
+                          RÉF : <span className="text-gray-900 font-extrabold">{pendingRef}</span>
+                        </p>
+                        <p className="text-[9.5px] text-gray-500 mt-0.5">Édité le : <strong className="text-gray-900 font-semibold">{new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}</strong></p>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+
+              {/* Cartouches d'Informations & Filtres */}
+              <div className="grid grid-cols-3 gap-3 mb-3 text-[10px]">
+                <div className="p-2.5 rounded-lg border border-gray-300 bg-gray-50/70 space-y-0.5">
+                  <p className="font-extrabold uppercase tracking-wider text-gray-500 text-[8.5px]">PROPRIÉTAIRE(S) CONCERNÉ(S)</p>
+                  <p className="text-xs font-bold text-gray-900">{pendingModalOwnerFilter === "__TOUS__" ? "Tous les propriétaires" : pendingModalOwnerFilter}</p>
+                </div>
+                <div className="p-2.5 rounded-lg border border-gray-300 bg-gray-50/70 space-y-0.5">
+                  <p className="font-extrabold uppercase tracking-wider text-gray-500 text-[8.5px]">PÉRIODE ANALYSÉE</p>
+                  <p className="text-xs font-bold text-gray-900">{pendingModalPeriodFilter === "__TOUTES__" ? "Toutes les périodes" : pendingModalPeriodFilter}</p>
+                </div>
+                <div className="p-2.5 rounded-lg border border-orange-300 bg-orange-50/70 space-y-0.5">
+                  <p className="font-extrabold uppercase tracking-wider text-orange-800 text-[8.5px]">LIGNES EN ATTENTE</p>
+                  <p className="text-xs font-bold text-orange-700">{filteredPendingItems.length} reversement(s) à effectuer</p>
+                </div>
+              </div>
+
+              {/* TABLEAU ANALYTIQUE DES REVERSEMENTS NON EFFECTUÉS */}
+              <div className="mb-3">
+                <div className="w-full overflow-hidden rounded border border-gray-300">
+                  <table className="w-full text-left text-[9.5px] border-collapse" style={{ tableLayout: "fixed" }}>
+                    <thead>
+                      <tr className="bg-gray-100 text-gray-700 uppercase font-bold text-[8.5px] border-b border-gray-300">
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "22%" }}>Bénéficiaire / Propriétaire</th>
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "24%" }}>Bien Immobilier</th>
+                        <th className="py-1 px-2 border-r border-gray-300" style={{ width: "16%" }}>Période / Mois</th>
+                        <th className="py-1 px-2 text-right border-r border-gray-300 whitespace-nowrap" style={{ width: "13%" }}>Loyers Encaissés</th>
+                        <th className="py-1 px-2 text-right border-r border-gray-300 whitespace-nowrap" style={{ width: "11%" }}>Honoraires</th>
+                        <th className="py-1 px-2 text-right whitespace-nowrap" style={{ width: "14%" }}>Net Restant Dû</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {filteredPendingItems.length > 0 ? (
+                        filteredPendingItems.map((item: any) => (
+                          <tr key={item.id} className="hover:bg-gray-50">
+                            <td className="py-1 px-2 font-bold text-gray-900 border-r border-gray-200 truncate" title={item.owner}>
+                              <span>{item.owner}</span>
+                              <span className="block text-[8px] text-gray-500 font-mono font-normal">{item.ownerCode}</span>
+                            </td>
+                            <td className="py-1 px-2 text-gray-700 border-r border-gray-200 truncate" title={item.bien}>
+                              {item.bien}
+                            </td>
+                            <td className="py-1 px-2 text-gray-800 font-semibold border-r border-gray-200 whitespace-nowrap">
+                              {item.period}
+                            </td>
+                            <td className="py-1 px-2 text-right text-gray-800 font-medium border-r border-gray-200 whitespace-nowrap">
+                              {formatFCFA(item.collected)}
+                            </td>
+                            <td className="py-1 px-2 text-right text-red-600 font-medium border-r border-gray-200 whitespace-nowrap">
+                              {item.commission > 0 ? `-${formatFCFA(item.commission)}` : "0 F CFA"}
+                            </td>
+                            <td className="py-1 px-2 text-right font-extrabold text-orange-600 whitespace-nowrap">
+                              {formatFCFA(item.remaining)}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="py-6 px-2 text-center text-gray-500 italic">
+                            <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
+                            Tous les reversements sont à jour ! Aucun loyer n'est actuellement en attente de versement pour ces critères.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-100 font-black text-[9.5px] text-gray-900 border-t-2 border-gray-400">
+                        <td colSpan={3} className="py-1.5 px-2 uppercase text-right border-r border-gray-300 font-black">Totaux Généraux :</td>
+                        <td className="py-1.5 px-2 text-right font-bold border-r border-gray-300 whitespace-nowrap">{formatFCFA(totalPendingModalCollected)}</td>
+                        <td className="py-1.5 px-2 text-right font-bold text-red-600 border-r border-gray-300 whitespace-nowrap">{totalPendingModalCommission > 0 ? `-${formatFCFA(totalPendingModalCommission)}` : "0 F CFA"}</td>
+                        <td className="py-1.5 px-2 text-right font-black text-orange-600 whitespace-nowrap">{formatFCFA(totalPendingModalAmount)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              {/* RECAPITULATIF FINANCIER GLOBAL */}
+              <div className="p-3 rounded-xl border-2 border-orange-500 bg-orange-50/80 mb-3 flex items-center justify-between text-xs avoid-break">
+                <div>
+                  <span className="font-black text-orange-950 uppercase tracking-wide block">TOTAL DES REVERSEMENTS NON ENCORE EFFECTUÉS :</span>
+                  <span className="text-[10px] text-orange-800">Montant net à débloquer et transférer aux propriétaires correspondants</span>
+                </div>
+                <span className="text-base sm:text-lg font-black text-orange-700 whitespace-nowrap">{formatFCFA(totalPendingModalAmount)}</span>
+              </div>
+
+              {/* BLOC DE SIGNATURES OFFICIELLES */}
+              <div className="grid grid-cols-2 gap-8 pt-2 border-t border-gray-300 text-[9.5px] avoid-break">
+                <div className="text-center space-y-3">
+                  <div>
+                    <p className="font-black uppercase tracking-wider text-gray-900">Pour le Gérant / L'Agence</p>
+                    <p className="text-[8.5px] text-gray-500 font-medium">L'Administration &amp; Comptabilité GESTIMMO</p>
+                  </div>
+                  <div className="border-b border-dashed border-gray-400 w-2/3 mx-auto pb-0.5">
+                    <span className="text-[8px] text-gray-400 italic">Signature &amp; Cachet officiel</span>
+                  </div>
+                </div>
+
+                <div className="text-center space-y-3">
+                  <div>
+                    <p className="font-black uppercase tracking-wider text-gray-900">Validation de la Comptabilité</p>
+                    <p className="text-[8.5px] text-gray-500 font-medium">Contrôle de gestion</p>
+                  </div>
+                  <div className="border-b border-dashed border-gray-400 w-2/3 mx-auto pb-0.5">
+                    <span className="text-[8px] text-gray-400 italic">Mention "Vu et approuvé" &amp; Date</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Footer de la modale avec bouton Reverser direct si des éléments sont en attente */}
+            {can("paiements", "edit") && filteredPendingItems.length > 0 && (
+              <div className="px-6 py-3 border-t border-app-border bg-gray-50 flex items-center justify-between no-print">
+                <p className="text-xs text-gray-500">
+                  {filteredPendingItems.length} propriétaire(s) / période(s) nécessitent un reversement.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstItem = filteredPendingItems[0];
+                    setPendingModalOpen(false);
+                    openReverserModal({
+                      owner: firstItem.owner,
+                      ownerId: firstItem.ownerId,
+                      period: firstItem.period,
+                    });
+                  }}
+                  className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" /> Effectuer le premier reversement ({filteredPendingItems[0]?.owner} - {filteredPendingItems[0]?.period})
+                </button>
+              </div>
+            )}
 
           </div>
         </div>
@@ -1939,7 +3134,7 @@ export default function ReversementsPage() {
                         </p>
                       </div>
                       <button
-                        onClick={() => handleAnnulerReversement(rev.id)}
+                        onClick={() => handleAnnulerReversement(rev)}
                         className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
                       >
                         <RotateCcw className="w-3.5 h-3.5" /> Annuler

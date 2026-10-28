@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { Database } from './types/database';
 import { getStoredVaultCredential, saveStoredVaultCredential } from './authSession';
+import { sortPaymentsDesc } from './utils';
 
 export type OwnerRow = Database['public']['Tables']['owners']['Row'];
 export type PropertyRow = Database['public']['Tables']['properties']['Row'];
@@ -264,7 +265,7 @@ export const deleteLease = async (id: string): Promise<boolean> => {
 export const fetchPayments = async (): Promise<PaymentRow[]> => {
   if (!isSupabaseConfigured()) return [];
   try {
-    const { data, error } = await supabase.from('payments').select('*').order('payment_date', { ascending: false });
+    const { data, error } = await supabase.from('payments').select('*').order('payment_date', { ascending: false }).order('created_at', { ascending: false });
     if (error) {
       console.warn('Supabase fetchPayments error:', error);
       return [];
@@ -316,25 +317,50 @@ export const fetchPayouts = async (): Promise<PayoutRow[]> => {
 };
 
 export const createPayout = async (payout: Database['public']['Tables']['payouts']['Insert']): Promise<PayoutRow | null> => {
+  invalidateDatabaseCache();
   if (!isSupabaseConfigured()) return null;
-  const payload = { company_id: DEFAULT_COMPANY_ID, ...payout };
+  const repairsDeduction = Number((payout as any).repairs_deduction ?? payout.repairs_deducted) || 0;
+  const cleanPayout: any = { ...payout };
+  delete cleanPayout.repairs_deducted;
+  cleanPayout.repairs_deduction = repairsDeduction;
+
+  const payload = { company_id: DEFAULT_COMPANY_ID, ...cleanPayout };
   const { data, error } = await supabase.from('payouts').insert(payload as any).select().single();
   if (error) {
     console.error('createPayout error:', error);
     return null;
   }
+  invalidateDatabaseCache();
   return data as unknown as PayoutRow;
 };
 
 export const updatePayout = async (id: string, updates: Database['public']['Tables']['payouts']['Update']): Promise<boolean> => {
+  invalidateDatabaseCache();
   if (!isSupabaseConfigured()) return false;
   const { error } = await (supabase.from('payouts') as any).update(updates).eq('id', id);
+  invalidateDatabaseCache();
   return !error;
 };
 
 export const deletePayout = async (id: string): Promise<boolean> => {
-  if (!isSupabaseConfigured()) return false;
+  invalidateDatabaseCache();
+  if (typeof window !== "undefined") {
+    try {
+      const stored = localStorage.getItem("gestimmo_reversements");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          const filtered = parsed.filter((r: any) => r.id !== id);
+          localStorage.setItem("gestimmo_reversements", JSON.stringify(filtered));
+        }
+      }
+    } catch (e) {
+      console.error("deletePayout localStorage cleanup error:", e);
+    }
+  }
+  if (!isSupabaseConfigured()) return true;
   const { error } = await supabase.from('payouts').delete().eq('id', id);
+  invalidateDatabaseCache();
   return !error;
 };
 
@@ -521,10 +547,31 @@ export interface FullDatabaseState {
   profiles: ProfileRow[];
 }
 
-export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | null> => {
+let cachedDbState: FullDatabaseState | null = null;
+let lastDbFetchTime = 0;
+let inFlightDbPromise: Promise<FullDatabaseState | null> | null = null;
+const CACHE_TTL_MS = 10000; // 10 secondes de cache mémoire pour fluidifier la navigation sans spammer Supabase
+
+export const invalidateDatabaseCache = () => {
+  cachedDbState = null;
+  lastDbFetchTime = 0;
+  inFlightDbPromise = null;
+};
+
+export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<FullDatabaseState | null> => {
   if (!isSupabaseConfigured()) return null;
 
-  try {
+  const now = Date.now();
+  if (!forceRefresh && cachedDbState && (now - lastDbFetchTime < CACHE_TTL_MS)) {
+    return cachedDbState;
+  }
+
+  if (inFlightDbPromise) {
+    return inFlightDbPromise;
+  }
+
+  inFlightDbPromise = (async () => {
+    try {
     const getLocalFallback = (key: string) => {
       if (typeof window === "undefined") return [];
       try {
@@ -571,6 +618,15 @@ export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | nul
       saveStoredVaultCredential(o.id, 'login', finalLogin);
       saveStoredVaultCredential(o.id, 'password', finalPass);
 
+      // Recover templates from localMatch or gestimmo_owner_${o.id}_templates
+      let templates = localMatch?.templates;
+      if (!templates && typeof window !== "undefined") {
+        try {
+          const cached = localStorage.getItem(`gestimmo_owner_${o.id}_templates`);
+          if (cached) templates = JSON.parse(cached);
+        } catch {}
+      }
+
       return {
         id: o.id,
         code: o.id_card_number || `PR-${o.id.slice(0, 6)}`,
@@ -584,6 +640,15 @@ export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | nul
         password: finalPass,
         accountStatus: localMatch?.accountStatus || "Actif",
         dateAdded: localMatch?.dateAdded || "01 Janv 2026",
+        modeReversement: localMatch?.modeReversement || "Virement Bancaire (Mensuel)",
+        nomBanque: localMatch?.nomBanque || "",
+        rib: localMatch?.rib || "",
+        dateNaissance: localMatch?.dateNaissance || "",
+        lieuNaissance: localMatch?.lieuNaissance || "",
+        cni: localMatch?.cni || o.id_card_number || "",
+        etablieLe: localMatch?.etablieLe || "",
+        dateCreation: localMatch?.dateCreation || "",
+        templates: templates || undefined,
       };
     });
 
@@ -632,10 +697,23 @@ export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | nul
     const units = rawUnits.map((u) => {
       const propObj = rawProperties.find((p) => p.id === u.property_id);
       const ownerObj = propObj ? rawOwners.find((o) => o.id === propObj.owner_id) : null;
+      const activeLease = rawLeases.find((l) => l.unit_id === u.id && (l.status === "ACTIF" || l.status === "EN_PRÉAVIS"));
+      const tenantObj = activeLease ? rawTenants.find((t) => t.id === activeLease.tenant_id) : null;
+
       let uiStatus = "Occupé";
-      if (u.status === "VACANT") uiStatus = "Vacant";
-      else if (u.status === "EN_PRÉAVIS") uiStatus = "En préavis";
-      else if (u.status === "EN_MAINTENANCE") uiStatus = "En maintenance";
+      if (activeLease) {
+        uiStatus = activeLease.status === "EN_PRÉAVIS" ? "En préavis" : "Occupé";
+      } else if (u.status === "VACANT") {
+        uiStatus = "Vacant";
+      } else if (u.status === "EN_PRÉAVIS") {
+        uiStatus = "En préavis";
+      } else if (u.status === "EN_MAINTENANCE") {
+        uiStatus = "En maintenance";
+      } else if (u.status === "OCCUPÉ") {
+        uiStatus = "Occupé";
+      } else {
+        uiStatus = "Vacant";
+      }
 
       let uiType = "Appartement";
       const rawUType = (u.type || "").toUpperCase();
@@ -699,6 +777,9 @@ export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | nul
         rent: Number(u.rent_amount) || 0,
         charges: Number(u.charges_amount) || 0,
         status: uiStatus,
+        tenant: tenantObj ? tenantObj.full_name : "-",
+        tenantId: activeLease?.tenant_id || "",
+        leaseId: activeLease?.id || "",
         description: cleanDescription,
       };
     });
@@ -846,6 +927,9 @@ export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | nul
         owner: ownerObj ? ownerObj.full_name : "Inconnu",
         ownerId: propObj?.owner_id || (ownerObj ? ownerObj.id : ""),
         date: pm.payment_date,
+        payment_date: pm.payment_date,
+        created_at: pm.created_at,
+        createdAt: pm.created_at,
         period: pm.period_month,
         amount: (() => {
           const rawAmt = Number(pm.amount) || 0;
@@ -871,16 +955,12 @@ export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | nul
       if (Math.abs(cleanGross - Math.round(cleanGross / 1000) * 1000) < 10) {
         cleanGross = Math.round(cleanGross / 1000) * 1000;
       }
-      if (cleanGross === 1120000) cleanGross = 1260000;
-      if (cleanGross === 1540000) cleanGross = 1680000;
 
       const rawNet = Number(po.net_amount) || 0;
       let cleanNet = Math.round(rawNet);
       if (Math.abs(cleanNet - Math.round(cleanNet / 1000) * 1000) < 10) {
         cleanNet = Math.round(cleanNet / 1000) * 1000;
       }
-      if (cleanNet === 1120000) cleanNet = 1260000;
-      if (cleanNet === 1540000) cleanNet = 1680000;
 
       return {
         id: po.id,
@@ -888,12 +968,18 @@ export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | nul
         owner: ownerObj ? ownerObj.full_name : "Inconnu",
         ownerId: po.owner_id,
         property: ownerProp ? ownerProp.name : "Multi-biens",
+        bien: ownerProp ? ownerProp.name : "Tous les biens",
+        logement: "Tous les logements",
         collected: cleanGross,
         commission: Number(po.agency_commission) || 0,
         repairs: Number(po.repairs_deduction) || 0,
         amount: cleanNet,
         status: "EFFECTUÉ",
         payment_method: po.payment_method,
+        method: po.payment_method || "Virement bancaire",
+        date: po.created_at ? po.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+        reference: `VIR-${po.id.slice(0, 6).toUpperCase()}`,
+        gerant: "Direction GESTIMMO",
       };
     });
 
@@ -990,35 +1076,52 @@ export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | nul
 
     const localRev = getLocalFallback('gestimmo_reversements');
     const finalPayouts = [...payouts];
-    localRev.forEach((lr: any) => {
-      if (lr && lr.id) {
-        let cleanAmt = typeof lr.amount === "number" ? lr.amount : parseFloat(String(lr.amount || 0).replace(/[^0-9.-]+/g, ""));
-        if (isNaN(cleanAmt)) cleanAmt = 0;
-        cleanAmt = Math.round(cleanAmt);
-        if (Math.abs(cleanAmt - Math.round(cleanAmt / 1000) * 1000) < 10) {
-          cleanAmt = Math.round(cleanAmt / 1000) * 1000;
-        }
-        if (cleanAmt === 1120000) cleanAmt = 1260000;
-        if (cleanAmt === 1540000) cleanAmt = 1680000;
+    if (!isSupabaseConfigured() || payouts.length === 0) {
+      localRev.forEach((lr: any) => {
+        if (lr && lr.id) {
+          let cleanAmt = typeof lr.amount === "number" ? lr.amount : parseFloat(String(lr.amount || 0).replace(/[^0-9.-]+/g, ""));
+          if (isNaN(cleanAmt)) cleanAmt = 0;
+          cleanAmt = Math.round(cleanAmt);
+          if (Math.abs(cleanAmt - Math.round(cleanAmt / 1000) * 1000) < 10) {
+            cleanAmt = Math.round(cleanAmt / 1000) * 1000;
+          }
 
-        let cleanColl = typeof lr.collected === "number" ? lr.collected : parseFloat(String(lr.collected || 0).replace(/[^0-9.-]+/g, ""));
-        if (isNaN(cleanColl)) cleanColl = 0;
-        cleanColl = Math.round(cleanColl);
-        if (Math.abs(cleanColl - Math.round(cleanColl / 1000) * 1000) < 10) {
-          cleanColl = Math.round(cleanColl / 1000) * 1000;
-        }
-        if (cleanColl === 1120000) cleanColl = 1260000;
-        if (cleanColl === 1540000) cleanColl = 1680000;
+          let cleanColl = typeof lr.collected === "number" ? lr.collected : parseFloat(String(lr.collected || 0).replace(/[^0-9.-]+/g, ""));
+          if (isNaN(cleanColl)) cleanColl = 0;
+          cleanColl = Math.round(cleanColl);
+          if (Math.abs(cleanColl - Math.round(cleanColl / 1000) * 1000) < 10) {
+            cleanColl = Math.round(cleanColl / 1000) * 1000;
+          }
 
-        const updatedLr = { ...lr, amount: cleanAmt, collected: cleanColl };
-        const idx = finalPayouts.findIndex((p: any) => p.id === lr.id);
-        if (idx >= 0) {
-          finalPayouts[idx] = updatedLr;
-        } else {
-          finalPayouts.push(updatedLr);
+          const updatedLr = { ...lr, amount: cleanAmt, collected: cleanColl };
+          const idx = finalPayouts.findIndex((p: any) => p.id === lr.id);
+          if (idx >= 0) {
+            finalPayouts[idx] = updatedLr;
+          } else {
+            finalPayouts.push(updatedLr);
+          }
+        }
+      });
+    } else {
+      // When Supabase is configured and has payouts, Supabase is the definitive source of truth!
+      // Purge any legacy/ghost R- records from localStorage so they don't corrupt history or calculations
+      if (typeof window !== "undefined") {
+        try {
+          const stored = localStorage.getItem("gestimmo_reversements");
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+              const cleaned = parsed.filter((lr: any) => lr && lr.id && !String(lr.id).startsWith("R-"));
+              if (cleaned.length !== parsed.length) {
+                localStorage.setItem("gestimmo_reversements", JSON.stringify(cleaned));
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Cleanup ghost reversements error:", e);
         }
       }
-    });
+    }
 
     const state: FullDatabaseState = {
       owners,
@@ -1026,7 +1129,7 @@ export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | nul
       units,
       tenants,
       leases,
-      payments,
+      payments: sortPaymentsDesc(payments),
       payouts: finalPayouts,
       incidents,
       leaseNotices,
@@ -1071,13 +1174,48 @@ export const loadAllDataFromDatabase = async (): Promise<FullDatabaseState | nul
       localStorage.setItem('gestimmo_reversements', JSON.stringify(finalPayouts));
       localStorage.setItem('gestimmo_incidents', JSON.stringify(incidents));
       localStorage.setItem('gestimmo_preavis', JSON.stringify(leaseNotices));
+
+      // Synchronize company info from Supabase
+      if (isSupabaseConfigured()) {
+        (supabase.from("companies") as any)
+          .select("*")
+          .eq("id", DEFAULT_COMPANY_ID)
+          .maybeSingle()
+          .then(({ data }: any) => {
+            if (data && typeof window !== "undefined") {
+              try {
+                const currentRaw = localStorage.getItem("gestimmo_company_info");
+                const current = currentRaw ? JSON.parse(currentRaw) : {};
+                const merged = {
+                  ...current,
+                  name: data.name || current.name || "ImmoGestion Pro",
+                  address: data.address || current.address || "",
+                  phone: data.phone || current.phone || "",
+                  email: data.email || current.email || "",
+                  logo: current.logo || data.logo_url || "",
+                };
+                localStorage.setItem("gestimmo_company_info", JSON.stringify(merged));
+                window.dispatchEvent(new Event("storage"));
+                window.dispatchEvent(new CustomEvent("gestimmo_company_updated", { detail: merged }));
+              } catch (e) {}
+            }
+          })
+          .catch(() => {});
+      }
     }
 
-    return state;
-  } catch (err) {
-    console.error('loadAllDataFromDatabase error:', err);
-    return null;
-  }
+      cachedDbState = state;
+      lastDbFetchTime = Date.now();
+      return state;
+    } catch (err) {
+      console.error('loadAllDataFromDatabase error:', err);
+      return null;
+    } finally {
+      inFlightDbPromise = null;
+    }
+  })();
+
+  return inFlightDbPromise;
 };
 
 /**

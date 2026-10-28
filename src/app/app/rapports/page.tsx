@@ -5,8 +5,9 @@ import {
   BarChart3, Download, PieChart, TrendingUp, Calendar, 
   Building2, Users, Printer, FileText, X, Filter, 
   Briefcase, UserCheck, FileSpreadsheet, Eye, Search, AlertCircle, ChevronDown, Check, Clock,
-  Receipt, CheckCircle2, RotateCcw, Megaphone, MessageSquare
+  Receipt, CheckCircle2, RotateCcw, Megaphone, MessageSquare, ArrowUpRight
 } from "lucide-react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
@@ -2110,25 +2111,52 @@ export default function RapportsPage() {
               <div className="absolute inset-[-24px] rounded-full border-[24px] border-orange-400" style={{ clipPath: 'polygon(50% 50%, 100% 0, 100% 30%)' }}></div>
               <div className="absolute inset-[-24px] rounded-full border-[24px] border-gray-200" style={{ clipPath: 'polygon(50% 50%, 100% 30%, 100% 50%)' }}></div>
               
-              <div className="text-center">
-                <p className="text-3xl font-bold text-gray-900">{tauxOccupationOverview}%</p>
-                <p className="text-xs text-gray-500">Occupé</p>
-              </div>
+              <Link 
+                href="/app/logements?status=Occupés"
+                className="text-center group p-3 rounded-full hover:bg-gray-50 transition-colors cursor-pointer"
+                title="Cliquer pour voir la liste des maisons occupées"
+              >
+                <p className="text-3xl font-bold text-gray-900 group-hover:text-primary transition-colors">{tauxOccupationOverview}%</p>
+                <p className="text-xs text-gray-500 group-hover:text-primary font-medium transition-colors">Occupé</p>
+              </Link>
             </div>
           </div>
-          <div className="flex justify-center gap-6 mt-6 pt-6 border-t border-app-border">
-            <div className="flex items-center">
-              <div className="w-3 h-3 rounded-full bg-green-500 mr-2"></div>
-              <span className="text-sm text-gray-600">Occupé ({totalOccupesOverview})</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-3 h-3 rounded-full bg-orange-400 mr-2"></div>
-              <span className="text-sm text-gray-600">Préavis ({totalPreavisOverview})</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-3 h-3 rounded-full bg-gray-200 mr-2"></div>
-              <span className="text-sm text-gray-600">Vacant ({totalVacantsOverview})</span>
-            </div>
+          <div className="flex flex-wrap justify-center gap-3 sm:gap-6 mt-6 pt-6 border-t border-app-border">
+            <Link 
+              href="/app/logements?status=Occupés"
+              className="flex items-center px-3 py-2 rounded-xl border border-transparent hover:border-emerald-200 hover:bg-emerald-50/70 transition-all cursor-pointer group shadow-sm hover:shadow"
+              title="Cliquer pour voir la liste des maisons occupées"
+            >
+              <div className="w-3 h-3 rounded-full bg-green-500 mr-2 shrink-0 group-hover:scale-125 transition-transform"></div>
+              <span className="text-sm font-medium text-gray-700 group-hover:text-emerald-800 transition-colors">
+                Occupé <strong className="font-bold">({totalOccupesOverview})</strong>
+              </span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 ml-1.5 transition-opacity" />
+            </Link>
+
+            <Link 
+              href="/app/resiliations?status=preavis"
+              className="flex items-center px-3 py-2 rounded-xl border border-transparent hover:border-orange-200 hover:bg-orange-50/70 transition-all cursor-pointer group shadow-sm hover:shadow"
+              title="Cliquer pour voir la liste des locataires ayant émis un préavis (leurs maisons et biens correspondants)"
+            >
+              <div className="w-3 h-3 rounded-full bg-orange-400 mr-2 shrink-0 group-hover:scale-125 transition-transform"></div>
+              <span className="text-sm font-medium text-gray-700 group-hover:text-orange-800 transition-colors">
+                Préavis <strong className="font-bold">({totalPreavisOverview})</strong>
+              </span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 ml-1.5 transition-opacity" />
+            </Link>
+
+            <Link 
+              href="/app/logements?status=Non+occupés"
+              className="flex items-center px-3 py-2 rounded-xl border border-transparent hover:border-gray-300 hover:bg-gray-100/80 transition-all cursor-pointer group shadow-sm hover:shadow"
+              title="Cliquer pour voir la liste des maisons vacantes"
+            >
+              <div className="w-3 h-3 rounded-full bg-gray-300 mr-2 shrink-0 group-hover:scale-125 transition-transform"></div>
+              <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900 transition-colors">
+                Vacant <strong className="font-bold">({totalVacantsOverview})</strong>
+              </span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 ml-1.5 transition-opacity" />
+            </Link>
           </div>
         </div>
 

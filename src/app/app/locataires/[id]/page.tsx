@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { ArrowLeft, Phone, Mail, MapPin, FileText, CreditCard, Clock, CheckCircle2, AlertCircle, FileCheck, IdCard, Plus, Calendar, X, Save, Trash2, Pencil, Download, AlertTriangle, Video, MessageSquare, Eye, Upload, FileWarning } from "lucide-react";
 import Link from "next/link";
-import { formatUnitDisplay, syncPaymentsWithLeases, getPaymentDisplayCode, getLeaseDisplayCode, getIncidentDisplayCode, checkTenantHasImportedContract, isUnitOccupied } from "@/lib/utils";
+import { formatUnitDisplay, syncPaymentsWithLeases, sortPaymentsDesc, getPaymentDisplayCode, getLeaseDisplayCode, getIncidentDisplayCode, checkTenantHasImportedContract, isUnitOccupied } from "@/lib/utils";
 import { deleteIncident, updateIncident, loadAllDataFromDatabase } from "@/lib/dataService";
 import { isImageFile, getFileSource } from "@/lib/imageCompressor";
 
@@ -985,7 +985,7 @@ export default function TenantDetailsPage({ params }: { params: { id: string } }
   });
 
   const displayedLeases = selectedLeaseId === "all" ? tenantLeases : tenantLeases.filter((l: any) => l.id === selectedLeaseId);
-  const displayedPayments = selectedLeaseId === "all" ? mappedPayments : mappedPayments.filter((p: any) => p.leaseId === selectedLeaseId);
+  const displayedPayments = sortPaymentsDesc(selectedLeaseId === "all" ? mappedPayments : mappedPayments.filter((p: any) => p.leaseId === selectedLeaseId));
 
   const computeNextPeriodAndAdvance = () => {
     let advance = 0;

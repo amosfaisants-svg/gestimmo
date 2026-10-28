@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Plus, Search, FileText, Calendar, X, Save, Trash2, Key, Copy, Check, CheckCircle2, Download, CheckSquare } from "lucide-react";
 import Link from "next/link";
 import { ensureTenantCredentials, TenantCredential } from "@/lib/tenantCredentials";
-import { getPdfTemplate, getReglementTemplate, getGenericTemplate } from "@/lib/storage";
+import { getPdfTemplate, getReglementTemplate, getGenericTemplate, getOrGenerateContratTemplate, getOrGenerateReglementTemplate } from "@/lib/storage";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
 import { checkAndAutoRenewLeases } from "@/lib/leaseRenewal";
@@ -76,12 +76,29 @@ function BauxContent() {
   const [customTemplates, setCustomTemplates] = useState<any[]>([]);
 
   useEffect(() => {
+    let tpls: any[] = [];
     const savedCustom = localStorage.getItem("gestimmo_custom_templates_list");
     if (savedCustom) {
       try {
-        setCustomTemplates(JSON.parse(savedCustom));
+        tpls = JSON.parse(savedCustom);
       } catch (e) {}
     }
+    const storedOwners = localStorage.getItem("gestimmo_proprietaires");
+    if (storedOwners) {
+      try {
+        const owners = JSON.parse(storedOwners);
+        owners.forEach((o: any) => {
+          if (o.templates?.customTemplates) {
+            o.templates.customTemplates.forEach((ct: any) => {
+              if (!tpls.some((t: any) => t.id === ct.id || t.fileKey === ct.fileKey)) {
+                tpls.push({ ...ct, ownerName: o.name });
+              }
+            });
+          }
+        });
+      } catch (e) {}
+    }
+    setCustomTemplates(tpls);
   }, []);
 
   const handleDownloadCustomTemplate = async (template: any) => {
@@ -445,6 +462,15 @@ const generateLeaseInitialPayments = (
     }
 
     return matchSearch && matchStatus && matchOwner && matchProperty;
+  }).sort((a, b) => {
+    const parseLeaseDate = (item: any) => {
+      const raw = item.startDate || item.start_date || item.start || item.createdAt || item.created_at;
+      if (!raw) return 0;
+      const ts = Date.parse(raw);
+      if (!isNaN(ts)) return ts;
+      return 0;
+    };
+    return parseLeaseDate(b) - parseLeaseDate(a);
   });
 
   const filteredBiens = ownerFilter === "Tous les propriétaires" 
@@ -493,16 +519,38 @@ const generateLeaseInitialPayments = (
 
   const handleDownloadModeleContrat = async () => {
     try {
-      let base64 = await getPdfTemplate();
-      if (!base64) base64 = localStorage.getItem("gestimmo_modele_contrat");
+      let base64: string | null = null;
+      let fileName = "Contrat_Bail_Standard_CI.pdf";
+      let contratFileKey: string | undefined = undefined;
+
+      if (ownerFilter) {
+        const storedOwners = localStorage.getItem("gestimmo_proprietaires");
+        if (storedOwners) {
+          try {
+            const owners = JSON.parse(storedOwners);
+            const o = owners.find((x: any) => 
+              (x.name && x.name.trim().toLowerCase() === ownerFilter.trim().toLowerCase()) ||
+              (x.full_name && x.full_name.trim().toLowerCase() === ownerFilter.trim().toLowerCase())
+            );
+            if (o?.templates?.contratFileKey) {
+              contratFileKey = o.templates.contratFileKey;
+              base64 = await getGenericTemplate(o.templates.contratFileKey);
+              if (o.templates.contratFileName) fileName = o.templates.contratFileName;
+            }
+          } catch (e) {}
+        }
+      }
       if (!base64) {
-        alert("Aucun modèle de contrat de bail n'a été importé dans les Paramètres.");
+        base64 = await getOrGenerateContratTemplate(ownerFilter || undefined, contratFileKey);
+      }
+      if (!base64) {
+        alert("Impossible de préparer le modèle de contrat.");
         return;
       }
-      const fileName = localStorage.getItem("gestimmo_modele_contrat_name") || "modèle_contrat.pdf";
+      const rawName = fileName ? fileName.replace(" (Sauvegardé)", "").replace(" (Actif)", "").trim() : "Contrat_Bail_Standard_CI.pdf";
       const a = document.createElement("a");
       a.href = base64;
-      a.download = fileName.endsWith(".pdf") ? fileName : `${fileName}.pdf`;
+      a.download = rawName.endsWith(".pdf") ? rawName : `${rawName}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -514,16 +562,38 @@ const generateLeaseInitialPayments = (
 
   const handleDownloadModeleReglement = async () => {
     try {
-      let base64 = await getReglementTemplate();
-      if (!base64) base64 = localStorage.getItem("gestimmo_modele_reglement");
+      let base64: string | null = null;
+      let fileName = "Reglement_Interieur_Standard.pdf";
+      let reglementFileKey: string | undefined = undefined;
+
+      if (ownerFilter) {
+        const storedOwners = localStorage.getItem("gestimmo_proprietaires");
+        if (storedOwners) {
+          try {
+            const owners = JSON.parse(storedOwners);
+            const o = owners.find((x: any) => 
+              (x.name && x.name.trim().toLowerCase() === ownerFilter.trim().toLowerCase()) ||
+              (x.full_name && x.full_name.trim().toLowerCase() === ownerFilter.trim().toLowerCase())
+            );
+            if (o?.templates?.reglementFileKey) {
+              reglementFileKey = o.templates.reglementFileKey;
+              base64 = await getGenericTemplate(o.templates.reglementFileKey);
+              if (o.templates.reglementFileName) fileName = o.templates.reglementFileName;
+            }
+          } catch (e) {}
+        }
+      }
       if (!base64) {
-        alert("Aucun modèle de règlement intérieur n'a été importé dans les Paramètres.");
+        base64 = await getOrGenerateReglementTemplate(ownerFilter || undefined, reglementFileKey);
+      }
+      if (!base64) {
+        alert("Impossible de préparer le modèle de règlement intérieur.");
         return;
       }
-      const fileName = localStorage.getItem("gestimmo_modele_reglement_name") || "modèle_règlement_intérieur.pdf";
+      const rawName = fileName ? fileName.replace(" (Sauvegardé)", "").replace(" (Actif)", "").trim() : "Reglement_Interieur_Standard.pdf";
       const a = document.createElement("a");
       a.href = base64;
-      a.download = fileName.endsWith(".pdf") ? fileName : `${fileName}.pdf`;
+      a.download = rawName.endsWith(".pdf") ? rawName : `${rawName}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

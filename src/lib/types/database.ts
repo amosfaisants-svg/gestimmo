@@ -421,6 +421,7 @@ export type Database = {
           payment_method: string
           period_month: string
           receipt_pdf_url?: string | null
+          repairs_deduction?: number
           repairs_deducted?: number
         }
         Update: {

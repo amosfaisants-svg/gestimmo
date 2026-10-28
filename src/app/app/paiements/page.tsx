@@ -3,12 +3,12 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
-import { Search, CreditCard, Download, X, Save, AlertCircle, Trash2, CheckSquare, Square, AlertTriangle } from "lucide-react";
+import { Search, CreditCard, Download, X, Save, AlertCircle, Trash2, CheckSquare, Square, AlertTriangle, ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
 import Link from "next/link";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
 import { loadAllDataFromDatabase, createPayment, deletePayment } from "@/lib/dataService";
-import { formatUnitDisplay, getPaymentDisplayCode, getLeaseDisplayCode, syncPaymentsWithLeases } from "@/lib/utils";
+import { formatUnitDisplay, getPaymentDisplayCode, getLeaseDisplayCode, syncPaymentsWithLeases, sortPaymentsDesc, comparePaymentsDesc } from "@/lib/utils";
 
 const formatFCFA = (amount: number | string) => {
   if (typeof amount === "string") return amount;
@@ -249,6 +249,7 @@ function PaymentsPageInner() {
   const [statusFilter, setStatusFilter] = useState("Tous statuts");
   const [ownerFilter, setOwnerFilter] = useState("Tous les propriétaires");
   const [propertyFilter, setPropertyFilter] = useState("Tous les biens");
+  const [sortOrder, setSortOrder] = useState<"recent" | "ancien" | "montant_desc" | "montant_asc">("recent");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   
@@ -314,16 +315,17 @@ function PaymentsPageInner() {
       }
 
       const syncedPayments = syncPaymentsWithLeases(pList, bList);
+      const sortedPayments = sortPaymentsDesc(syncedPayments);
 
-      setPayments(syncedPayments);
+      setPayments(sortedPayments);
       setLeases(bList);
       setTenants(tList);
       setLogements(uList);
       setBiens(propList);
       setOwners(oList);
 
-      if (typeof window !== "undefined" && syncedPayments.length > 0) {
-        localStorage.setItem("gestimmo_paiements", JSON.stringify(syncedPayments));
+      if (typeof window !== "undefined" && sortedPayments.length > 0) {
+        localStorage.setItem("gestimmo_paiements", JSON.stringify(sortedPayments));
       }
     };
 
@@ -478,9 +480,13 @@ function PaymentsPageInner() {
 
     const newPayment = {
       id: tempId,
+      code: `REC-${tempId.slice(0, 8).toUpperCase()}`,
       tenant: selectedLease ? selectedLease.tenant.toUpperCase() : "LOCATAIRE INCONNU",
       unit: selectedLease ? selectedLease.unit.toUpperCase() : "-",
       date: formattedDate,
+      payment_date: newDate || new Date().toISOString().split("T")[0],
+      created_at: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
       period: newPeriod,
       amount: parseInt(newAmount) || 0,
       method: newMethod ? newMethod.toUpperCase() : "VIREMENT",
@@ -488,7 +494,7 @@ function PaymentsPageInner() {
       status: "PAYÉ"
     };
     
-    const updatedPayments = [newPayment, ...payments];
+    const updatedPayments = sortPaymentsDesc([newPayment, ...payments]);
     setPayments(updatedPayments);
     localStorage.setItem("gestimmo_paiements", JSON.stringify(updatedPayments));
 
@@ -621,7 +627,27 @@ function PaymentsPageInner() {
     setIsModalOpen(true);
   };
 
-  const realFilteredPayments = filteredPayments.filter(p => !p.isVirtual);
+  const sortedFilteredPayments = [...filteredPayments].sort((a, b) => {
+    if (sortOrder === "recent") {
+      return comparePaymentsDesc(a, b);
+    }
+    if (sortOrder === "ancien") {
+      return comparePaymentsDesc(b, a);
+    }
+    if (sortOrder === "montant_desc") {
+      const diff = (Number(b.amount) || 0) - (Number(a.amount) || 0);
+      if (diff !== 0) return diff;
+      return comparePaymentsDesc(a, b);
+    }
+    if (sortOrder === "montant_asc") {
+      const diff = (Number(a.amount) || 0) - (Number(b.amount) || 0);
+      if (diff !== 0) return diff;
+      return comparePaymentsDesc(a, b);
+    }
+    return comparePaymentsDesc(a, b);
+  });
+
+  const realFilteredPayments = sortedFilteredPayments.filter(p => !p.isVirtual);
 
   const toggleSelectPayment = (id: string) => {
     setSelectedPaymentIds(prev =>
@@ -1034,6 +1060,17 @@ function PaymentsPageInner() {
                 <option>En attente</option>
                 <option value="EN RETARD">En retard</option>
               </select>
+              <select 
+                className="border border-app-border rounded-lg px-3 py-2 text-sm bg-white font-medium text-gray-700 outline-none focus:ring-2 focus:ring-primary/20"
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as any)}
+                title="Ordre de classement des paiements"
+              >
+                <option value="recent">Plus récents d'abord</option>
+                <option value="ancien">Plus anciens d'abord</option>
+                <option value="montant_desc">Montant (décroissant)</option>
+                <option value="montant_asc">Montant (croissant)</option>
+              </select>
             </div>
           </div>
         </div>
@@ -1051,18 +1088,48 @@ function PaymentsPageInner() {
                   />
                 </th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium">Reçu</th>
-                <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium">Date</th>
+                <th 
+                  className="px-4 py-3.5 md:px-6 md:py-4 font-medium cursor-pointer hover:bg-primary-100/40 transition-colors select-none group/th"
+                  onClick={() => setSortOrder(prev => prev === "recent" ? "ancien" : "recent")}
+                  title={sortOrder === "recent" ? "Trié du plus récent au plus ancien (cliquer pour inverser)" : "Trié du plus ancien au plus récent (cliquer pour inverser)"}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Date</span>
+                    {sortOrder === "recent" ? (
+                      <ArrowDown className="w-3.5 h-3.5 text-primary group-hover/th:scale-110 transition-transform" />
+                    ) : sortOrder === "ancien" ? (
+                      <ArrowUp className="w-3.5 h-3.5 text-primary group-hover/th:scale-110 transition-transform" />
+                    ) : (
+                      <ArrowUpDown className="w-3.5 h-3.5 text-gray-400 group-hover/th:text-primary transition-colors" />
+                    )}
+                  </div>
+                </th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium">Locataire</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium">Propriétaire</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Période payée</th>
-                <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Montant</th>
+                <th 
+                  className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center cursor-pointer hover:bg-primary-100/40 transition-colors select-none group/th"
+                  onClick={() => setSortOrder(prev => prev === "montant_desc" ? "montant_asc" : "montant_desc")}
+                  title="Trier par montant"
+                >
+                  <div className="flex items-center justify-center gap-1.5">
+                    <span>Montant</span>
+                    {sortOrder === "montant_desc" ? (
+                      <ArrowDown className="w-3.5 h-3.5 text-primary" />
+                    ) : sortOrder === "montant_asc" ? (
+                      <ArrowUp className="w-3.5 h-3.5 text-primary" />
+                    ) : (
+                      <ArrowUpDown className="w-3.5 h-3.5 text-gray-400 group-hover/th:text-primary transition-colors" />
+                    )}
+                  </div>
+                </th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Mode</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Statut</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-app-border">
-              {filteredPayments.length > 0 ? filteredPayments.map((payment) => (
+              {sortedFilteredPayments.length > 0 ? sortedFilteredPayments.map((payment) => (
                 <tr key={payment.id} className={`hover:bg-gray-50/50 transition-colors group ${payment.isVirtual ? 'bg-red-50/30' : selectedPaymentIds.includes(payment.id) ? 'bg-primary/5' : ''}`}>
                   <td className="px-3 py-4 text-center">
                     {!payment.isVirtual ? (

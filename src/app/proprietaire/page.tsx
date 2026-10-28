@@ -8,14 +8,12 @@ import { loadAllDataFromDatabase } from "@/lib/dataService";
 import { getPortalSession } from "@/lib/authSession";
 import { getMessagesForUser, markMessageAsRead, UserMessage } from "@/lib/messagesService";
 import { MessageDetailModal } from "@/components/ui/MessageDetailModal";
-
-const formatFCFA = (amount: number | string) => {
-  if (typeof amount === "string") return amount;
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(amount);
-};
+import { formatFCFA } from "@/lib/utils";
+import { isPendingRentsVisibleForOwner } from "@/lib/portalSettings";
 
 export default function ProprietaireDashboard() {
   const [currentOwner, setCurrentOwner] = useState<any>(null);
+  const [canViewPendingRents, setCanViewPendingRents] = useState(true);
   const [stats, setStats] = useState({
     pendingPayout: 0,
     grossRevenue: 0,
@@ -64,6 +62,7 @@ export default function ProprietaireDashboard() {
       }
 
       setCurrentOwner(ownerObj);
+      setCanViewPendingRents(isPendingRentsVisibleForOwner(ownerObj));
 
       if (ownerObj) {
         const ownerName = ownerObj.name || "";
@@ -73,22 +72,38 @@ export default function ProprietaireDashboard() {
       const storedBiens = localStorage.getItem("gestimmo_biens");
       const biens: any[] = storedBiens ? JSON.parse(storedBiens) : [];
       const myBiens = biens.filter(
-        (b: any) => b.owner && ownerName && b.owner.trim().toUpperCase() === ownerName.trim().toUpperCase()
+        (b: any) => 
+          (b.owner && ownerName && b.owner.trim().toUpperCase() === ownerName.trim().toUpperCase()) ||
+          (b.ownerId && ownerObj.id && String(b.ownerId) === String(ownerObj.id))
       );
-      const myBiensNames = myBiens.map((b: any) => b.name.trim().toUpperCase());
+      const myBiensNames = myBiens.map((b: any) => (b.name || "").trim().toUpperCase());
+      const myBiensIds = myBiens.map((b: any) => b.id);
+
+      // Load baux
+      const storedBaux = localStorage.getItem("gestimmo_baux");
+      const baux: any[] = storedBaux ? JSON.parse(storedBaux) : [];
 
       // Load logements
       const storedLogements = localStorage.getItem("gestimmo_logements");
       const logements: any[] = storedLogements ? JSON.parse(storedLogements) : [];
       const myLogements = logements.filter(
         (l: any) =>
-          (l.property && myBiensNames.includes(l.property.trim().toUpperCase())) ||
+          (l.property && myBiensNames.includes((l.property || "").trim().toUpperCase())) ||
+          (l.propertyId && myBiensIds.includes(l.propertyId)) ||
           (l.owner && ownerName && l.owner.trim().toUpperCase() === ownerName.trim().toUpperCase())
       );
       const myLogementsIds = myLogements.map((l: any) => l.id);
 
       const totalUnits = myLogements.length > 0 ? myLogements.length : myBiens.reduce((sum, b) => sum + (b.units || 1), 0);
-      const occupiedUnits = myLogements.filter((l) => l.status === "OCCUPÉ" || (l.tenant && l.tenant !== "-")).length;
+      const occupiedUnits = myLogements.filter((l) => {
+        const isOccup = (l.status || "").trim().toLowerCase().includes("occup");
+        const hasTenant = l.tenant && l.tenant !== "-" && l.tenant !== "—";
+        const hasActiveLease = baux.some((b: any) => 
+          ((b.status || "").trim().toUpperCase() === "ACTIF" || (b.status || "").trim().toUpperCase() === "EN PRÉAVIS") &&
+          ((b.unitId && b.unitId === l.id) || (b.unit && (b.unit === l.unit || b.unit === l.unit_number || b.unit === l.id)))
+        );
+        return isOccup || hasTenant || hasActiveLease;
+      }).length;
       const occupancyRate = totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
 
       // Load paiements
@@ -96,8 +111,10 @@ export default function ProprietaireDashboard() {
       const paiements: any[] = storedPaiements ? JSON.parse(storedPaiements) : [];
       const myPaiements = paiements.filter(
         (p: any) =>
-          (myLogementsIds.includes(p.unit) ||
-            (p.property && myBiensNames.includes(p.property.trim().toUpperCase())) ||
+          (myLogementsIds.includes(p.unitId) ||
+            myLogementsIds.includes(p.unit) ||
+            (p.propertyId && myBiensIds.includes(p.propertyId)) ||
+            (p.property && myBiensNames.includes((p.property || "").trim().toUpperCase())) ||
             (p.owner && ownerName && p.owner.trim().toUpperCase() === ownerName.trim().toUpperCase())) &&
           (p.status === "VALIDÉ" || p.status === "PAYÉ")
       );
@@ -154,10 +171,12 @@ export default function ProprietaireDashboard() {
   };
 
   window.addEventListener("gestimmo_messages_updated", handleUpdate);
+  window.addEventListener("gestimmo_portal_settings_updated", handleUpdate);
   window.addEventListener("storage", handleUpdate);
 
   return () => {
     window.removeEventListener("gestimmo_messages_updated", handleUpdate);
+    window.removeEventListener("gestimmo_portal_settings_updated", handleUpdate);
     window.removeEventListener("storage", handleUpdate);
   };
   }, []);
@@ -195,6 +214,16 @@ export default function ProprietaireDashboard() {
               </Badge>
               {stats.status === "EFFECTUÉ" ? "Tous vos reversements sont à jour" : "Prévu pour le 10 Octobre 2026"}
             </p>
+            {canViewPendingRents && stats.pendingPayout > 0 && (
+              <div className="mt-4 pt-3 border-t border-gray-700/60">
+                <Link
+                  href="/proprietaire/loyers-en-attente"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary-200 hover:text-white transition-colors"
+                >
+                  <Clock className="w-3.5 h-3.5" /> Voir le détail des loyers en attente &rarr;
+                </Link>
+              </div>
+            )}
           </div>
         </div>
 
@@ -242,17 +271,32 @@ export default function ProprietaireDashboard() {
           </div>
         </Link>
 
-        <div className="bg-white p-6 rounded-2xl border border-app-border shadow-sm flex flex-col justify-between h-40">
-          <div className="flex justify-between items-start">
-            <div className="w-12 h-12 bg-gray-50 text-gray-600 rounded-xl flex items-center justify-center">
-              <TrendingUp className="w-6 h-6" />
+        {canViewPendingRents ? (
+          <Link href="/proprietaire/loyers-en-attente" className="bg-white p-6 rounded-2xl border border-app-border shadow-sm hover:shadow-md transition-shadow group flex flex-col justify-between h-40 cursor-pointer">
+            <div className="flex justify-between items-start">
+              <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
+                <Clock className="w-6 h-6" />
+              </div>
+              <ArrowRight className="w-5 h-5 text-gray-300 group-hover:text-primary transition-colors" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900">Loyers en attente</h3>
+              <p className="text-xs text-gray-500 mt-1">Loyers perçus non encore reversés</p>
+            </div>
+          </Link>
+        ) : (
+          <div className="bg-white p-6 rounded-2xl border border-app-border shadow-sm flex flex-col justify-between h-40">
+            <div className="flex justify-between items-start">
+              <div className="w-12 h-12 bg-gray-50 text-gray-600 rounded-xl flex items-center justify-center">
+                <TrendingUp className="w-6 h-6" />
+              </div>
+            </div>
+            <div>
+              <h3 className="text-xs text-gray-500 uppercase font-semibold">Loyers bruts du mois</h3>
+              <p className="text-xl font-bold text-gray-900 mt-1">{formatFCFA(stats.grossRevenue)}</p>
             </div>
           </div>
-          <div>
-            <h3 className="text-xs text-gray-500 uppercase font-semibold">Loyers bruts du mois</h3>
-            <p className="text-xl font-bold text-gray-900 mt-1">{formatFCFA(stats.grossRevenue)}</p>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Messages de la gérance */}

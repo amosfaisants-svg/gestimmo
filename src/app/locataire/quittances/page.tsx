@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Download, Loader2, FileCheck2, History, X, ShieldAlert } from "lucide-react";
-import { formatUnitDisplay, getPaymentDisplayCode } from "@/lib/utils";
+import { formatUnitDisplay, getPaymentDisplayCode, sortPaymentsDesc } from "@/lib/utils";
 import { getPortalSession } from "@/lib/authSession";
 import { loadAllDataFromDatabase } from "@/lib/dataService";
 
@@ -199,8 +199,8 @@ export default function LocataireQuittancesPage() {
       }
     });
 
-    setActivePayments(activeList);
-    setTerminatedPayments(terminatedList);
+    setActivePayments(sortPaymentsDesc(activeList));
+    setTerminatedPayments(sortPaymentsDesc(terminatedList));
   };
 
   loadQuittances();
