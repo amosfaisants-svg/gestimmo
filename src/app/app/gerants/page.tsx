@@ -341,11 +341,23 @@ export default function GerantsPage() {
       if (calculatedPerformance > 100) calculatedPerformance = 100;
     }
 
+    const managerLatePayments = paiements.filter((p: any) => 
+      assignedLogements.includes(p.unit) && 
+      (p.status === "EN RETARD" || p.status === "IMPAYÉ" || p.status === "REJETÉ")
+    );
+    const retardsCount = managerLatePayments.length;
+    let retardsAmount = managerLatePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    if (retardsAmount === 0 && retardsCount > 0 && calculatedTarget > calculatedCollected) {
+      retardsAmount = calculatedTarget - calculatedCollected;
+    }
+
     return {
       ...manager,
       propertiesCount: propertiesCount,
       collected: calculatedCollected,
-      performance: calculatedPerformance
+      performance: calculatedPerformance,
+      retardsCount: retardsCount,
+      retardsAmount: retardsAmount,
     };
   });
 
@@ -863,6 +875,7 @@ export default function GerantsPage() {
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Biens assignés</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Encaissé (Mois)</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Taux recouvrement</th>
+                <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Retards à relancer</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-center">Statut</th>
                 <th className="px-4 py-3.5 md:px-6 md:py-4 font-medium text-right">Actions</th>
               </tr>
@@ -913,6 +926,20 @@ export default function GerantsPage() {
                         <div className={`h-full rounded-full ${manager.performance >= 90 ? 'bg-green-500' : manager.performance >= 75 ? 'bg-orange-400' : 'bg-red-500'}`} style={{ width: `${manager.performance}%` }}></div>
                       </div>
                     </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-center">
+                    {manager.retardsCount > 0 ? (
+                      <Link href="/app/paiements?status=EN+RETARD" className="inline-flex flex-col items-center group cursor-pointer" title="Cliquer pour voir et relancer les retards">
+                        <Badge variant="alert" dot className="group-hover:bg-amber-100 transition-colors">
+                          {manager.retardsCount} à relancer
+                        </Badge>
+                        <span className="text-[11px] font-bold text-red-600 mt-0.5">
+                          {formatFCFA(manager.retardsAmount)}
+                        </span>
+                      </Link>
+                    ) : (
+                      <Badge variant="success" dot>À jour</Badge>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <button

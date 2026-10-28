@@ -17,7 +17,10 @@ import {
   Power, 
   Copy, 
   CheckCircle2, 
-  Shield 
+  Shield,
+  Clock,
+  AlertTriangle,
+  ArrowRight
 } from "lucide-react";
 import Link from "next/link";
 import { formatFCFA, isUUID, formatUnitDisplay } from "@/lib/utils";
@@ -61,6 +64,7 @@ export default function ManagerDetailsPage({ params }: { params: { id: string } 
   const [paiements, setPaiements] = useState<any[]>([]);
   const [biens, setBiens] = useState<any[]>([]);
   const [owners, setOwners] = useState<any[]>([]);
+  const [locataires, setLocataires] = useState<any[]>([]);
   const [assignOwnerFilter, setAssignOwnerFilter] = useState("Tous les propriétaires");
   const [assignBienFilter, setAssignBienFilter] = useState("Tous les biens");
   const [isPerformanceModalOpen, setIsPerformanceModalOpen] = useState(false);
@@ -178,6 +182,7 @@ export default function ManagerDetailsPage({ params }: { params: { id: string } 
         setOwners(dbState.owners || []);
         setBaux(dbState.leases || []);
         setPaiements(dbState.payments || []);
+        setLocataires(dbState.tenants || []);
       } else {
         const storedLogements = localStorage.getItem("gestimmo_logements");
         const allLogements = storedLogements ? JSON.parse(storedLogements) : defaultLogements;
@@ -194,6 +199,9 @@ export default function ManagerDetailsPage({ params }: { params: { id: string } 
 
         const storedPaiements = localStorage.getItem("gestimmo_paiements");
         if (storedPaiements) setPaiements(JSON.parse(storedPaiements));
+
+        const storedLocataires = localStorage.getItem("gestimmo_locataires");
+        if (storedLocataires) setLocataires(JSON.parse(storedLocataires));
       }
 
       setIsLoading(false);
@@ -382,28 +390,62 @@ export default function ManagerDetailsPage({ params }: { params: { id: string } 
   let calculatedTarget = manager?.target || 0;
   let calculatedCollected = manager?.collected || 0;
   let calculatedPerformance = manager?.performance || 0;
+  let retardsGerantCount = 0;
+  let calculatedRetardsAmount = 0;
+  const retardLogementIds = new Set<string>();
 
   if (manager && manager.assignedLogements) {
-    const activeLeases = baux.filter(b => b.status === "ACTIF" && manager.assignedLogements.includes(b.unit));
+    const assignedUnitsList = manager.assignedLogements;
+    const activeLeases = baux.filter(b => b.status === "ACTIF" && assignedUnitsList.includes(b.unit));
     calculatedTarget = activeLeases.reduce((sum, lease) => sum + (lease.rent || 0), 0);
 
     const now = new Date();
-    const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`; // e.g. "2026-09"
-    const currentMonthName = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }).toLowerCase(); // e.g. "septembre 2026"
+    const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const currentMonthName = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }).toLowerCase();
 
     const currentMonthPayments = paiements.filter(p => {
-      if (!manager.assignedLogements.includes(p.unit)) return false;
+      if (!assignedUnitsList.includes(p.unit)) return false;
       if (p.status !== "PAYÉ" && p.status !== "VALIDÉ") return false;
       
       const pPeriod = (p.period || "").toLowerCase();
-      // On compte le paiement s'il concerne la période en cours
       return pPeriod === currentMonthStr || pPeriod.includes(currentMonthName.split(' ')[0]);
     });
 
     calculatedCollected = currentMonthPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
     calculatedPerformance = calculatedTarget > 0 ? Math.round((calculatedCollected / calculatedTarget) * 100) : 0;
-    // Cap at 100% just in case of overpayments
     if (calculatedPerformance > 100) calculatedPerformance = 100;
+
+    // Calcul des impayés & retards à relancer pour ce gérant
+    const latePaymentsGerant = paiements.filter((p: any) => 
+      assignedUnitsList.includes(p.unit) && 
+      (p.status === "EN RETARD" || p.status === "IMPAYÉ" || p.status === "REJETÉ")
+    );
+
+    const gerantLateTenants = locataires.filter((t: any) => 
+      (assignedUnitsList.includes(t.unit) || activeLeases.some((b: any) => b.tenant === t.name)) &&
+      (t.status === "EN RETARD" || t.status === "IMPAYÉ")
+    );
+
+    latePaymentsGerant.forEach((p: any) => {
+      if (p.unit) retardLogementIds.add(p.unit);
+    });
+    gerantLateTenants.forEach((t: any) => {
+      if (t.unit) retardLogementIds.add(t.unit);
+      const matchLease = activeLeases.find((b: any) => b.tenant === t.name);
+      if (matchLease && matchLease.unit) retardLogementIds.add(matchLease.unit);
+    });
+
+    retardsGerantCount = Math.max(retardLogementIds.size, latePaymentsGerant.length, gerantLateTenants.length);
+    
+    calculatedRetardsAmount = latePaymentsGerant.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
+    if (calculatedRetardsAmount === 0 && retardsGerantCount > 0) {
+      calculatedRetardsAmount = activeLeases
+        .filter((b: any) => retardLogementIds.has(b.unit) || gerantLateTenants.some((t: any) => t.name === b.tenant))
+        .reduce((sum: number, b: any) => sum + (Number(b.rent) || 0), 0);
+    }
+    if (calculatedRetardsAmount === 0 && calculatedTarget > calculatedCollected) {
+      calculatedRetardsAmount = calculatedTarget - calculatedCollected;
+    }
   }
 
   const filteredModalPayments = paiements
@@ -749,7 +791,7 @@ export default function ManagerDetailsPage({ params }: { params: { id: string } 
                 Historique des encaissements
               </button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-gray-50 p-4 rounded-xl border border-app-border">
                 <p className="text-xs text-gray-500 mb-1">Objectif de collecte</p>
                 <p className="text-xl font-bold text-gray-900">{formatFCFA(calculatedTarget)}</p>
@@ -766,6 +808,30 @@ export default function ManagerDetailsPage({ params }: { params: { id: string } 
                     <div className="h-full bg-primary rounded-full" style={{ width: `${calculatedPerformance}%` }}></div>
                   </div>
                 </div>
+              </div>
+              <div className={`p-4 rounded-xl border flex flex-col justify-between ${retardsGerantCount > 0 ? "bg-red-50/70 border-red-200" : "bg-emerald-50/50 border-emerald-200"}`}>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className={`text-xs font-semibold ${retardsGerantCount > 0 ? "text-red-700" : "text-emerald-700"}`}>Retards à relancer</p>
+                    <Badge variant={retardsGerantCount > 0 ? "alert" : "success"} dot className="text-[10px] py-0">
+                      {retardsGerantCount > 0 ? `${retardsGerantCount} retard(s)` : "À jour"}
+                    </Badge>
+                  </div>
+                  <p className={`text-xl font-bold ${retardsGerantCount > 0 ? "text-red-700" : "text-emerald-700"}`}>
+                    {retardsGerantCount > 0 ? formatFCFA(calculatedRetardsAmount) : "0 F CFA"}
+                  </p>
+                </div>
+                {retardsGerantCount > 0 ? (
+                  <Link 
+                    href="/app/paiements?status=EN+RETARD"
+                    className="text-[11px] font-semibold text-red-600 hover:text-red-800 hover:underline mt-2 flex items-center gap-1"
+                  >
+                    <span>Relancer les retards</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </Link>
+                ) : (
+                  <p className="text-[11px] text-emerald-600 mt-2">Aucun impayé constaté</p>
+                )}
               </div>
             </div>
           </div>
@@ -789,31 +855,65 @@ export default function ManagerDetailsPage({ params }: { params: { id: string } 
               </h2>
             </div>
             <div className="p-4 space-y-4">
-              {propertiesToDisplay.length > 0 ? propertiesToDisplay.map(logement => (
-                <div key={logement.id} className="border border-app-border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 bg-gray-50 rounded-lg"><Home className="w-5 h-5 text-gray-500" /></div>
-                    <div>
-                      <Link href={`/app/logements/${logement.id}`} className="text-sm font-semibold text-gray-900 hover:text-primary hover:underline">
-                        {getLogementDisplayLabel(logement)} - {logement.property}
-                      </Link>
-                      <p className="text-xs text-gray-500 mt-1">{logement.type} • {logement.status}</p>
+              {propertiesToDisplay.length > 0 ? propertiesToDisplay.map(logement => {
+                const isOverdue = retardLogementIds.has(logement.id) || 
+                  retardLogementIds.has(logement.unit) ||
+                  (logement.tenant && locataires.some((t: any) => t.name === logement.tenant && (t.status === "EN RETARD" || t.status === "IMPAYÉ")));
+
+                return (
+                  <div 
+                    key={logement.id} 
+                    className={`border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+                      isOverdue 
+                        ? "border-red-200 bg-red-50/20 shadow-sm" 
+                        : "border-app-border"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`p-2 rounded-lg ${isOverdue ? "bg-red-100 text-red-600" : "bg-gray-50 text-gray-500"}`}>
+                        <Home className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Link href={`/app/logements/${logement.id}`} className="text-sm font-semibold text-gray-900 hover:text-primary hover:underline">
+                            {getLogementDisplayLabel(logement)} - {logement.property}
+                          </Link>
+                          {isOverdue && (
+                            <Badge variant="alert" dot className="text-[10px] py-0">
+                              Retard à relancer
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {logement.type} • {logement.tenant && logement.tenant !== "-" ? `Locataire: ${logement.tenant}` : logement.status}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right flex flex-col items-end gap-2">
+                      <div>
+                        <p className="text-xs text-gray-500 mb-0.5">Loyer Mensuel</p>
+                        <p className={`text-sm font-bold ${isOverdue ? "text-red-700" : "text-gray-900"}`}>{formatFCFA(logement.rent)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isOverdue && (
+                          <Link
+                            href="/app/paiements?status=EN+RETARD"
+                            className="text-xs font-semibold bg-red-600 text-white px-2.5 py-1 rounded-md hover:bg-red-700 transition-colors shadow-xs"
+                          >
+                            Relancer
+                          </Link>
+                        )}
+                        <button 
+                          onClick={() => handleUnassignProperty(logement.id)}
+                          className="text-xs text-red-500 hover:text-red-700 hover:underline font-medium"
+                        >
+                          Retirer
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <div className="text-right flex flex-col items-end gap-2">
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Loyer Mensuel</p>
-                      <p className="text-sm font-bold text-gray-900">{formatFCFA(logement.rent)}</p>
-                    </div>
-                    <button 
-                      onClick={() => handleUnassignProperty(logement.id)}
-                      className="text-xs text-red-500 hover:text-red-700 hover:underline font-medium"
-                    >
-                      Retirer
-                    </button>
-                  </div>
-                </div>
-              )) : (
+                );
+              }) : (
                 <p className="text-sm text-gray-500 text-center py-4">Aucun logement géré pour le moment.</p>
               )}
             </div>

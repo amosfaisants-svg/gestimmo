@@ -116,6 +116,9 @@ export default function OwnerDetailsPage() {
           const storedPaiements = localStorage.getItem("gestimmo_paiements");
           const paiements = storedPaiements ? JSON.parse(storedPaiements) : [];
 
+          const storedLocataires = localStorage.getItem("gestimmo_locataires");
+          const locataires = storedLocataires ? JSON.parse(storedLocataires) : [];
+
           const biensWithStats = ownerBiens.map((bien: any) => {
             const propertyLogements = logements.filter((l: any) => (l.property && bien.name && l.property.trim().toLowerCase() === bien.name.trim().toLowerCase()) || l.propertyId === bien.id);
             const propertyUnitsIds = propertyLogements.map((l: any) => l.id);
@@ -143,7 +146,31 @@ export default function OwnerDetailsPage() {
             // Revenue generated = paid payments if > 0, otherwise monthly rent of active baux, or initial bien.revenue
             const revenue = paidRevenue > 0 ? paidRevenue : (bauxMonthlyRent > 0 ? bauxMonthlyRent : (Number(bien.revenue) || 0));
 
-            return { ...bien, units: unitsCount, occupied: occupiedCount, revenue };
+            // Retards & impayés à relancer pour ce bien
+            const propertyLatePayments = paiements.filter((p: any) => 
+              (propertyUnitsIds.includes(p.unit) || 
+               (p.property && bien.name && p.property.trim().toLowerCase() === bien.name.trim().toLowerCase()) ||
+               propertyBaux.some((b: any) => b.tenant === p.tenant || b.unit === p.unit)) &&
+              (p.status === "EN RETARD" || p.status === "IMPAYÉ" || p.status === "REJETÉ")
+            );
+
+            const propertyLateTenants = locataires.filter((t: any) => 
+              (propertyUnitsIds.includes(t.unit) || propertyBaux.some((b: any) => b.tenant === t.name)) &&
+              (t.status === "EN RETARD" || t.status === "IMPAYÉ")
+            );
+
+            const lateCount = Math.max(propertyLatePayments.length, propertyLateTenants.length);
+            const lateAmount = propertyLatePayments.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0) ||
+              propertyBaux.filter((b: any) => propertyLateTenants.some((t: any) => t.name === b.tenant)).reduce((sum: number, b: any) => sum + (Number(b.rent) || 0), 0);
+
+            return { 
+              ...bien, 
+              units: unitsCount, 
+              occupied: occupiedCount, 
+              revenue,
+              lateCount,
+              lateAmount
+            };
           });
 
           setManagedProperties(biensWithStats);
@@ -218,6 +245,44 @@ export default function OwnerDetailsPage() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Left Column */}
         <div className="xl:col-span-2 space-y-6">
+
+          {/* Alerte Retards de loyers à relancer sur ce propriétaire */}
+          {(() => {
+            const totalOwnerRetardsCount = managedProperties.reduce((sum, b) => sum + (b.lateCount || 0), 0);
+            const totalOwnerRetardsAmount = managedProperties.reduce((sum, b) => sum + (b.lateAmount || 0), 0);
+
+            if (totalOwnerRetardsCount === 0) return null;
+
+            return (
+              <div className="bg-red-50/80 border border-red-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-red-100 text-red-600 rounded-xl shrink-0">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold text-red-900">
+                        Retards de loyers à relancer : {totalOwnerRetardsCount} dossier{totalOwnerRetardsCount > 1 ? "s" : ""}
+                      </p>
+                      <Badge variant="alert" dot className="text-[10px] py-0">
+                        Action requise
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-red-700 mt-0.5">
+                      Montant total en souffrance sur ce patrimoine : <strong className="font-bold text-red-900">{formatFCFA(totalOwnerRetardsAmount)}</strong>
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href="/app/paiements?status=EN+RETARD"
+                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition-colors shrink-0 flex items-center justify-center gap-1.5 shadow-sm"
+                >
+                  <span>Relancer les locataires</span>
+                  &rarr;
+                </Link>
+              </div>
+            );
+          })()}
           
           {/* Biens en gestion */}
           <div className="bg-white rounded-2xl border border-app-border shadow-sm overflow-hidden flex flex-col">
@@ -227,19 +292,38 @@ export default function OwnerDetailsPage() {
             <div className="p-4 space-y-4">
               {managedProperties.length > 0 ? (
                 managedProperties.map(property => (
-                  <div key={property.id} className="border border-app-border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div 
+                    key={property.id} 
+                    className={`border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+                      property.lateCount > 0 ? "border-red-200 bg-red-50/20" : "border-app-border"
+                    }`}
+                  >
                     <div className="flex items-start gap-3">
-                      <div className="p-2 bg-gray-50 rounded-lg"><Building2 className="w-5 h-5 text-gray-500" /></div>
+                      <div className={`p-2 rounded-lg ${property.lateCount > 0 ? "bg-red-100 text-red-600" : "bg-gray-50 text-gray-500"}`}>
+                        <Building2 className="w-5 h-5" />
+                      </div>
                       <div>
-                        <Link href={`/app/biens/${property.id}`} className="text-sm font-semibold text-gray-900 hover:text-primary hover:underline">
-                          {property.name}
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link href={`/app/biens/${property.id}`} className="text-sm font-semibold text-gray-900 hover:text-primary hover:underline">
+                            {property.name}
+                          </Link>
+                          {property.lateCount > 0 && (
+                            <Badge variant="alert" dot className="text-[10px] py-0">
+                              {property.lateCount} retard{property.lateCount > 1 ? 's' : ''} à relancer
+                            </Badge>
+                          )}
+                        </div>
                         <p className="text-xs text-gray-500 mt-1">ID: {property.id} • {property.occupied}/{property.units} logements occupés</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs text-gray-500 mb-1">Revenus générés (mois)</p>
+                      <p className="text-xs text-gray-500 mb-0.5">Revenus générés (mois)</p>
                       <p className="text-sm font-bold text-gray-900">{formatFCFA(property.revenue)}</p>
+                      {property.lateCount > 0 && (
+                        <p className="text-[11px] font-bold text-red-600 mt-0.5">
+                          En retard : {formatFCFA(property.lateAmount)}
+                        </p>
+                      )}
                     </div>
                   </div>
                 ))

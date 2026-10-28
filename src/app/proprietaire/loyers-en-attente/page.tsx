@@ -31,6 +31,7 @@ export default function LoyersEnAttentePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [commissionRate, setCommissionRate] = useState<number>(0);
   const [isFeatureAllowed, setIsFeatureAllowed] = useState(true);
+  const [overdueTenantRents, setOverdueTenantRents] = useState<any[]>([]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -129,6 +130,26 @@ export default function LoyersEnAttentePage() {
 
           return false;
         });
+
+        // 4b. Load Overdue / Late Paiements from tenants
+        const myOverduePaiements = paiements.filter((p: any) => {
+          const isLate = p.status === "EN RETARD" || p.status === "IMPAYÉ" || p.status === "REJETÉ";
+          if (!isLate) return false;
+
+          const pOwnerId = String(p.ownerId || p.owner_id || "").trim();
+          const pOwner = String(p.owner || "").trim().toUpperCase();
+          if (pOwnerId && ownerId && pOwnerId === ownerId) return true;
+          if (pOwner && ownerName && pOwner === ownerName) return true;
+
+          const pUnit = String(p.unitId || p.unit_id || p.unit || "").trim().toLowerCase();
+          if (pUnit && (myLogementsIds.includes(pUnit) || myLogementsNames.includes(pUnit))) return true;
+
+          const pProp = String(p.propertyId || p.property || p.bien || "").trim().toUpperCase();
+          if (pProp && (myBiensIds.includes(pProp) || myBiensNames.includes(pProp))) return true;
+
+          return false;
+        });
+        setOverdueTenantRents(myOverduePaiements);
 
         // 5. Load Reversements
         const storedReversements = localStorage.getItem("gestimmo_reversements");
@@ -432,6 +453,33 @@ export default function LoyersEnAttentePage() {
           </div>
         </div>
       </div>
+
+      {/* Bandeau d'information sur les retards locataires & relances */}
+      {overdueTenantRents.length > 0 && (
+        <div className="bg-amber-50/80 border border-amber-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-100 text-amber-700 rounded-xl shrink-0">
+              <Clock className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-amber-950">
+                  Retards de paiement constatés : {overdueTenantRents.length} loyer{overdueTenantRents.length > 1 ? "s" : ""} en attente de règlement
+                </p>
+                <Badge variant="alert" dot className="text-[10px] py-0">
+                  Relances en cours par l'agence
+                </Badge>
+              </div>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Total en souffrance locataire : <strong className="font-bold">{formatFCFA(overdueTenantRents.reduce((sum, p) => sum + (Number(p.amount) || 0), 0))}</strong> — Notre équipe gestionnaire effectue les relances nécessaires pour régulariser ces montants.
+              </p>
+            </div>
+          </div>
+          <Badge variant="default" className="bg-white border border-amber-300 text-amber-800 font-semibold px-3 py-1.5 self-start sm:self-center shrink-0">
+            {overdueTenantRents.length} dossier{overdueTenantRents.length > 1 ? "s" : ""} suivi{overdueTenantRents.length > 1 ? "s" : ""}
+          </Badge>
+        </div>
+      )}
 
       {/* Main Content & Table */}
       <div className="bg-white rounded-2xl border border-app-border shadow-sm overflow-hidden flex flex-col">

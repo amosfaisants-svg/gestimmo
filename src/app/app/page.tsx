@@ -758,6 +758,29 @@ export default function Dashboard() {
       recoveryRate = 100;
     }
 
+    // Calcul des impayés et retards du gérant
+    const gerantLatePayments = gerantPaiementsList.filter((p: any) => 
+      p.status === "EN RETARD" || p.status === "IMPAYÉ" || p.status === "REJETÉ"
+    );
+    const gerantLateTenants = activeLocataires.filter((t: any) => 
+      (managedUnitKeys.has(t.unit) || gerantBauxList.some((b: any) => b.tenant === t.name)) &&
+      (t.status === "EN RETARD" || t.status === "IMPAYÉ")
+    );
+    const gerantOverdueUnits = new Set([
+      ...gerantLatePayments.map((p: any) => p.unit),
+      ...gerantLateTenants.map((t: any) => t.unit),
+    ]);
+    const gerantRetardsCount = Math.max(gerantOverdueUnits.size, gerantLatePayments.length, gerantLateTenants.length);
+    let gerantRetardsAmount = gerantLatePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    if (gerantRetardsAmount === 0 && gerantRetardsCount > 0) {
+      gerantRetardsAmount = gerantBauxList
+        .filter((b: any) => gerantOverdueUnits.has(b.unit) || gerantLateTenants.some((t: any) => t.name === b.tenant))
+        .reduce((sum, b) => sum + (Number(b.rent || b.loyer) || 0), 0);
+    }
+    if (gerantRetardsAmount === 0 && targetRentMonth > collectedMonth) {
+      gerantRetardsAmount = targetRentMonth - collectedMonth;
+    }
+
     return (
       <div className="space-y-6 pt-12 md:pt-0 pb-12">
         {/* Header Banner Espace Gérant */}
@@ -792,7 +815,7 @@ export default function Dashboard() {
         </div>
 
         {/* Cartes Métriques Gérant */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="bg-white p-6 rounded-2xl border border-app-border shadow-sm space-y-2">
             <div className="flex justify-between items-center text-gray-500">
               <span className="text-xs font-semibold uppercase tracking-wider">Objectif de collecte</span>
@@ -823,6 +846,22 @@ export default function Dashboard() {
               </div>
             </div>
             <p className="text-xs text-gray-500">Performance individuelle</p>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl border border-app-border shadow-sm space-y-2">
+            <div className="flex justify-between items-center text-gray-500">
+              <span className="text-xs font-semibold uppercase tracking-wider text-red-600">Retards à relancer</span>
+              <Clock className="w-5 h-5 text-red-600" />
+            </div>
+            <p className="text-2xl font-bold text-red-600">{formatFCFA(gerantRetardsAmount)}</p>
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-gray-500">{gerantRetardsCount} loyer(s) en retard</p>
+              {gerantRetardsCount > 0 && (
+                <Link href="/app/paiements?status=EN+RETARD" className="text-xs text-red-600 font-semibold hover:underline">
+                  Relancer &rarr;
+                </Link>
+              )}
+            </div>
           </div>
 
           <div className="bg-white p-6 rounded-2xl border border-app-border shadow-sm space-y-2">
@@ -926,18 +965,46 @@ export default function Dashboard() {
               {assignedLogements.length > 0 ? assignedLogements.map((unitId) => {
                 const logement = activeLogements.find((l: any) => l.id === unitId || l.unit === unitId);
                 const lease = activeBaux.find((b: any) => (b.unit === unitId || (logement && b.unit === logement.unit)) && b.status === "ACTIF");
+                const isOverdue = gerantOverdueUnits.has(unitId) || 
+                  (logement && (gerantOverdueUnits.has(logement.id) || gerantOverdueUnits.has(logement.unit))) ||
+                  (lease && (gerantOverdueUnits.has(lease.unit) || gerantLateTenants.some((t: any) => t.name === lease.tenant)));
+
                 return (
-                  <div key={unitId} className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-1.5 hover:border-primary/30 transition-colors">
+                  <div 
+                    key={unitId} 
+                    className={`p-3 rounded-xl border space-y-2 transition-all ${
+                      isOverdue 
+                        ? "bg-red-50/30 border-red-200 shadow-xs" 
+                        : "bg-gray-50 border-gray-200 hover:border-primary/30"
+                    }`}
+                  >
                     <div className="flex justify-between items-center">
                       <span className="font-bold text-xs text-gray-900">🏠 {formatUnitDisplay(unitId)} - {logement?.property || "Bien rattaché"}</span>
-                      <Badge variant={lease ? "success" : "default"} className="text-[10px]">
-                        {lease ? "Occupé" : "Disponible"}
-                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        {isOverdue && (
+                          <Badge variant="alert" dot className="text-[10px] py-0">
+                            Retard à relancer
+                          </Badge>
+                        )}
+                        <Badge variant={lease ? "success" : "default"} className="text-[10px]">
+                          {lease ? "Occupé" : "Disponible"}
+                        </Badge>
+                      </div>
                     </div>
                     {lease ? (
-                      <div className="text-[11px] text-gray-600 flex justify-between items-center">
+                      <div className="text-[11px] text-gray-600 flex justify-between items-center pt-0.5">
                         <span>Locataire: <strong>{lease.tenant}</strong></span>
-                        <span className="font-bold text-gray-900">{formatFCFA(lease.rent)}/mois</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold ${isOverdue ? "text-red-700" : "text-gray-900"}`}>{formatFCFA(lease.rent)}/mois</span>
+                          {isOverdue && (
+                            <Link
+                              href="/app/paiements?status=EN+RETARD"
+                              className="text-[10px] font-semibold bg-red-600 text-white px-2 py-0.5 rounded hover:bg-red-700 transition-colors"
+                            >
+                              Relancer
+                            </Link>
+                          )}
+                        </div>
                       </div>
                     ) : (
                       <p className="text-[11px] text-gray-400">Aucun bail actif pour cet appartement.</p>
@@ -1069,8 +1136,33 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* À traiter */}
         {(() => {
-          const retardsCount = filteredPaiementsPeriod.filter(p => p.status === "EN RETARD" || p.status === "IMPAYÉ" || p.status === "REJETÉ").length 
-            + filteredBaux.filter(b => b.status === "EN RETARD").length;
+          // Tous les paiements réels en retard ou impayés (toutes périodes confondues avec filtre bien/entreprise)
+          const latePaiementsAll = activePaiements.filter((p: any) => 
+            matchesAllFilters(p, false) && 
+            (p.status === "EN RETARD" || p.status === "IMPAYÉ" || p.status === "REJETÉ")
+          );
+
+          // Tous les locataires marqués EN RETARD ou IMPAYÉ
+          const lateLocatairesAll = activeLocataires.filter((t: any) => 
+            matchesAllFilters(t, false) && 
+            (t.status === "EN RETARD" || t.status === "IMPAYÉ")
+          );
+
+          // Baux actifs en retard ou associés à un locataire/paiement en retard
+          const lateBauxAll = filteredBaux.filter((b: any) => 
+            b.status === "EN RETARD" ||
+            lateLocatairesAll.some((t: any) => t.name && b.tenant && t.name.trim().toLowerCase() === b.tenant.trim().toLowerCase()) ||
+            latePaiementsAll.some((p: any) => p.tenant && b.tenant && p.tenant.trim().toLowerCase() === b.tenant.trim().toLowerCase())
+          );
+
+          const retardsKeys = new Set([
+            ...latePaiementsAll.map((p: any) => p.id || p.tenant),
+            ...lateLocatairesAll.map((t: any) => t.id || t.name),
+            ...lateBauxAll.map((b: any) => b.id || b.tenant),
+          ]);
+          const retardsCount = Math.max(retardsKeys.size, latePaiementsAll.length, lateLocatairesAll.length);
+          const retardsTotalMontant = latePaiementsAll.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0) ||
+            lateBauxAll.reduce((sum: number, b: any) => sum + (Number(b.rent || b.loyer) || 0), 0);
 
           const locatairesSansContrat = activeLocataires.filter((t: any) => {
             if (!matchesAllFilters(t, false)) return false;
@@ -1102,8 +1194,17 @@ export default function Dashboard() {
                   <div className="flex items-start gap-3">
                     <div className="p-2 bg-red-50 rounded-lg text-red-600 mt-0.5"><Clock className="w-4 h-4" /></div>
                     <div>
-                      <p className="text-sm font-medium text-gray-900 group-hover:text-primary transition-colors">Retards à relancer</p>
-                      <p className="text-xs text-gray-500">{retardsCount} loyer{retardsCount > 1 ? 's' : ''} en retard</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-gray-900 group-hover:text-primary transition-colors">Retards à relancer</p>
+                        {retardsCount > 0 && (
+                          <Badge variant="alert" dot className="text-[10px] py-0">
+                            {retardsCount} à relancer
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {retardsCount} loyer{retardsCount > 1 ? 's' : ''} en retard {retardsTotalMontant > 0 ? `(${formatFCFA(retardsTotalMontant)})` : ''}
+                      </p>
                     </div>
                   </div>
                   <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-primary transition-colors" />
