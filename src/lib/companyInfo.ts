@@ -1,4 +1,5 @@
-import { isSupabaseConfigured, DEFAULT_COMPANY_ID } from "./dataService";
+import { isSupabaseConfigured } from "./dataService";
+import { getActiveCompanyId } from "./authSession";
 import { supabase } from "./supabase";
 
 export interface CompanyInfo {
@@ -44,9 +45,10 @@ export function getStoredCompanyInfo(): CompanyInfo {
 export async function fetchCompanyFromSupabase(): Promise<CompanyInfo | null> {
   if (!isSupabaseConfigured() || typeof window === "undefined") return null;
   try {
+    const activeCompanyId = getActiveCompanyId();
     const { data, error } = await (supabase.from("companies") as any)
       .select("*")
-      .eq("id", DEFAULT_COMPANY_ID)
+      .eq("id", activeCompanyId)
       .maybeSingle();
 
     if (error || !data) return null;
@@ -104,10 +106,11 @@ export function saveStoredCompanyInfo(info: Partial<CompanyInfo>): CompanyInfo {
   // Synchronisation Supabase en arrière-plan sans bloquer l'interface
   if (isSupabaseConfigured()) {
     try {
+      const activeCompanyId = getActiveCompanyId();
       (supabase.from("companies") as any)
         .upsert(
           {
-            id: DEFAULT_COMPANY_ID,
+            id: activeCompanyId,
             name: updated.name || "ImmoGestion Pro",
             address: updated.address || null,
             phone: updated.phone || null,

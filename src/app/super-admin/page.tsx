@@ -44,6 +44,7 @@ import {
 } from "@/lib/superAdminService";
 import { setPortalSession, clearPortalSession } from "@/lib/authSession";
 import { getDefaultPermissions } from "@/lib/companyCredentials";
+import { invalidateDatabaseCache } from "@/lib/dataService";
 
 export default function SuperAdminPage() {
   const router = useRouter();
@@ -213,6 +214,7 @@ export default function SuperAdminPage() {
   };
 
   const handleImpersonateAgency = (agency: SaaSAgency) => {
+    invalidateDatabaseCache();
     setPortalSession("ADMIN", {
       id: agency.id,
       companyId: agency.id,

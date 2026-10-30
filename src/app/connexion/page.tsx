@@ -9,6 +9,7 @@ import { authenticateProprietaire } from "@/lib/ownerCredentials";
 import { authenticateCompanyUser } from "@/lib/companyCredentials";
 import { authenticateSuperAdmin, isAgencySuspendedForUser } from "@/lib/superAdminService";
 import { setPortalSession, getPortalSession } from "@/lib/authSession";
+import { invalidateDatabaseCache } from "@/lib/dataService";
 
 export default function ConnexionPage() {
   const router = useRouter();
@@ -113,6 +114,7 @@ export default function ConnexionPage() {
         Boolean((companyUser as any).assignedLogements);
       const roleKey = isGerant ? "GERANT" : companyUser.role?.toUpperCase() || "ADMIN";
 
+      invalidateDatabaseCache();
       setPortalSession("ADMIN", { ...companyUser, userRole: roleKey });
       router.replace("/app");
       return;

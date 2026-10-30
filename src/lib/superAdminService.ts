@@ -278,9 +278,9 @@ export async function syncAgenciesWithSupabase(): Promise<SaaSAgency[]> {
           email: comp.email || existing.email,
           phone: comp.phone || existing.phone,
           address: comp.address || existing.address,
-          propertiesCount: compProps.length || existing.propertiesCount,
-          unitsCount: compUnits.length || existing.unitsCount,
-          tenantsCount: compTenants.length || existing.tenantsCount,
+          propertiesCount: compProps.length,
+          unitsCount: compUnits.length,
+          tenantsCount: compTenants.length,
           usersCount: Math.max(compProfiles.length, existing.usersCount || 1),
         });
       } else {
@@ -314,12 +314,29 @@ export async function syncAgenciesWithSupabase(): Promise<SaaSAgency[]> {
     // Mettre à jour les compteurs de l'agence principale même si elle n'est pas encore dans companies
     if (mergedMap.has(DEFAULT_COMPANY_ID)) {
       const mainAg = mergedMap.get(DEFAULT_COMPANY_ID)!;
-      if (dbProps.length > 0 || dbTenants.length > 0) {
-        mainAg.propertiesCount = dbProps.length;
-        mainAg.unitsCount = dbUnits.length;
-        mainAg.tenantsCount = dbTenants.length;
+      const mainProps = dbProps.filter((p) => !p.company_id || p.company_id === DEFAULT_COMPANY_ID);
+      const mainPropIds = new Set(mainProps.map((p) => p.id));
+      const mainUnits = dbUnits.filter((u) => (u.property_id && mainPropIds.has(u.property_id)) || !u.company_id || u.company_id === DEFAULT_COMPANY_ID);
+      const mainTenants = dbTenants.filter((t) => !t.company_id || t.company_id === DEFAULT_COMPANY_ID);
+      if (mainProps.length > 0 || mainTenants.length > 0) {
+        mainAg.propertiesCount = mainProps.length;
+        mainAg.unitsCount = mainUnits.length;
+        mainAg.tenantsCount = mainTenants.length;
       }
     }
+
+    // Pour toutes les autres agences locales qui ne sont pas l'agence principale, calculer strictement leurs propres biens
+    mergedMap.forEach((ag, agId) => {
+      if (agId !== DEFAULT_COMPANY_ID) {
+        const agProps = dbProps.filter((p) => p.company_id === agId);
+        const agPropIds = new Set(agProps.map((p) => p.id));
+        const agUnits = dbUnits.filter((u) => (u.property_id && agPropIds.has(u.property_id)) || u.company_id === agId);
+        const agTenants = dbTenants.filter((t) => t.company_id === agId);
+        ag.propertiesCount = agProps.length;
+        ag.unitsCount = agUnits.length;
+        ag.tenantsCount = agTenants.length;
+      }
+    });
 
     const updatedList = Array.from(mergedMap.values());
     saveSaaSAgencies(updatedList);
@@ -415,6 +432,30 @@ export async function registerNewSaaSAgency(input: {
         ...users.filter((u: any) => (u.email || "").toLowerCase() !== cleanEmail),
       ];
       localStorage.setItem("gestimmo_company_users", JSON.stringify(updatedUsers));
+
+      // Initialiser un espace de travail 100 % vierge pour cette nouvelle agence
+      const emptyWorkspace = {
+        gestimmo_proprietaires: "[]",
+        gestimmo_biens: "[]",
+        gestimmo_logements: "[]",
+        gestimmo_locataires: "[]",
+        gestimmo_baux: "[]",
+        gestimmo_paiements: "[]",
+        gestimmo_reversements: "[]",
+        gestimmo_incidents: "[]",
+        gestimmo_preavis: "[]",
+        gestimmo_equipe: "[]",
+        gestimmo_notifications: "[]",
+        gestimmo_messages: "[]",
+        gestimmo_company_info: JSON.stringify({
+          name: newAgency.name,
+          email: cleanEmail,
+          phone: cleanPhone,
+          address: newAgency.address || "Abidjan, Côte d'Ivoire",
+          logo: "",
+        }),
+      };
+      localStorage.setItem(`gestimmo_workspace_${newAgencyId}`, JSON.stringify(emptyWorkspace));
     } catch (e) {
       console.error("Erreur ajout utilisateur agence:", e);
     }

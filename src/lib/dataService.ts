@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { Database } from './types/database';
-import { getStoredVaultCredential, saveStoredVaultCredential } from './authSession';
+import { getStoredVaultCredential, saveStoredVaultCredential, getActiveCompanyId } from './authSession';
 import { sortPaymentsDesc, calculateTenantDelay } from './utils';
 
 export type OwnerRow = Database['public']['Tables']['owners']['Row'];
@@ -78,7 +78,7 @@ export const fetchOwners = async (): Promise<OwnerRow[]> => {
 
 export const createOwner = async (owner: Database['public']['Tables']['owners']['Insert']): Promise<OwnerRow | null> => {
   if (!isSupabaseConfigured()) return null;
-  const payload = { company_id: DEFAULT_COMPANY_ID, ...owner };
+  const payload = { company_id: getActiveCompanyId(), ...owner };
   const { data, error } = await supabase.from('owners').insert(payload as any).select().single();
   if (error) {
     console.error('createOwner error:', error);
@@ -117,7 +117,7 @@ export const fetchProperties = async (): Promise<PropertyRow[]> => {
 
 export const createProperty = async (property: Database['public']['Tables']['properties']['Insert']): Promise<PropertyRow | null> => {
   if (!isSupabaseConfigured()) return null;
-  const payload = { company_id: DEFAULT_COMPANY_ID, ...property };
+  const payload = { company_id: getActiveCompanyId(), ...property };
   const { data, error } = await supabase.from('properties').insert(payload as any).select().single();
   if (error) {
     console.error('createProperty error:', error);
@@ -156,7 +156,7 @@ export const fetchUnits = async (): Promise<UnitRow[]> => {
 
 export const createUnit = async (unit: Database['public']['Tables']['units']['Insert']): Promise<UnitRow | null> => {
   if (!isSupabaseConfigured()) return null;
-  const payload = { company_id: DEFAULT_COMPANY_ID, ...unit };
+  const payload = { company_id: getActiveCompanyId(), ...unit };
   const { data, error } = await supabase.from('units').insert(payload as any).select().single();
   if (error) {
     console.error('createUnit error:', error);
@@ -201,7 +201,7 @@ export const fetchTenants = async (): Promise<TenantRow[]> => {
 
 export const createTenant = async (tenant: Database['public']['Tables']['tenants']['Insert']): Promise<TenantRow | null> => {
   if (!isSupabaseConfigured()) return null;
-  const payload = { company_id: DEFAULT_COMPANY_ID, ...tenant };
+  const payload = { company_id: getActiveCompanyId(), ...tenant };
   const { data, error } = await supabase.from('tenants').insert(payload as any).select().single();
   if (error) {
     console.error('createTenant error:', error);
@@ -240,7 +240,7 @@ export const fetchLeases = async (): Promise<LeaseRow[]> => {
 
 export const createLease = async (lease: Database['public']['Tables']['leases']['Insert']): Promise<LeaseRow | null> => {
   if (!isSupabaseConfigured()) return null;
-  const payload = { company_id: DEFAULT_COMPANY_ID, ...lease };
+  const payload = { company_id: getActiveCompanyId(), ...lease };
   const { data, error } = await supabase.from('leases').insert(payload as any).select().single();
   if (error) {
     console.error('createLease error:', error);
@@ -279,7 +279,7 @@ export const fetchPayments = async (): Promise<PaymentRow[]> => {
 
 export const createPayment = async (payment: Database['public']['Tables']['payments']['Insert']): Promise<PaymentRow | null> => {
   if (!isSupabaseConfigured()) return null;
-  const payload = { company_id: DEFAULT_COMPANY_ID, ...payment };
+  const payload = { company_id: getActiveCompanyId(), ...payment };
   const { data, error } = await supabase.from('payments').insert(payload as any).select().single();
   if (error) {
     console.error('createPayment error:', error);
@@ -324,7 +324,7 @@ export const createPayout = async (payout: Database['public']['Tables']['payouts
   delete cleanPayout.repairs_deducted;
   cleanPayout.repairs_deduction = repairsDeduction;
 
-  const payload = { company_id: DEFAULT_COMPANY_ID, ...cleanPayout };
+  const payload = { company_id: getActiveCompanyId(), ...cleanPayout };
   const { data, error } = await supabase.from('payouts').insert(payload as any).select().single();
   if (error) {
     console.error('createPayout error:', error);
@@ -382,7 +382,7 @@ export const fetchLeaseNotices = async (): Promise<LeaseNoticeRow[]> => {
 
 export const createLeaseNotice = async (notice: Database['public']['Tables']['lease_notices']['Insert']): Promise<LeaseNoticeRow | null> => {
   if (!isSupabaseConfigured()) return null;
-  const payload = { company_id: DEFAULT_COMPANY_ID, ...notice };
+  const payload = { company_id: getActiveCompanyId(), ...notice };
   const { data, error } = await supabase.from('lease_notices').insert(payload as any).select().single();
   if (error) {
     console.error('createLeaseNotice error:', error);
@@ -422,7 +422,7 @@ export const fetchIncidents = async (): Promise<IncidentRow[]> => {
 export const createIncident = async (incident: Database['public']['Tables']['incidents']['Insert'] | Record<string, any>): Promise<IncidentRow | null> => {
   if (!isSupabaseConfigured()) return null;
   const payload = { 
-    company_id: DEFAULT_COMPANY_ID, 
+    company_id: getActiveCompanyId(), 
     ...incident,
     files: incident.files || [],
     priority: normalizeIncidentPriority(incident.priority),
@@ -512,7 +512,7 @@ export const fetchProfiles = async (): Promise<ProfileRow[]> => {
 
 export const createProfile = async (profile: Database['public']['Tables']['profiles']['Insert']): Promise<ProfileRow | null> => {
   if (!isSupabaseConfigured()) return null;
-  const payload = { company_id: DEFAULT_COMPANY_ID, ...profile };
+  const payload = { company_id: getActiveCompanyId(), ...profile };
   const { data, error } = await supabase.from('profiles').insert(payload as any).select().single();
   if (error) {
     console.error('createProfile error:', error);
@@ -548,12 +548,14 @@ export interface FullDatabaseState {
 }
 
 let cachedDbState: FullDatabaseState | null = null;
+let cachedCompanyId: string | null = null;
 let lastDbFetchTime = 0;
 let inFlightDbPromise: Promise<FullDatabaseState | null> | null = null;
 const CACHE_TTL_MS = 10000; // 10 secondes de cache mémoire pour fluidifier la navigation sans spammer Supabase
 
 export const invalidateDatabaseCache = () => {
   cachedDbState = null;
+  cachedCompanyId = null;
   lastDbFetchTime = 0;
   inFlightDbPromise = null;
 };
@@ -561,8 +563,16 @@ export const invalidateDatabaseCache = () => {
 export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<FullDatabaseState | null> => {
   if (!isSupabaseConfigured()) return null;
 
+  const activeCompanyId = getActiveCompanyId();
+  const isMainCompany = !activeCompanyId || activeCompanyId === DEFAULT_COMPANY_ID;
+
+  // Invalider automatiquement le cache si l'utilisateur a changé d'agence
+  if (cachedCompanyId && cachedCompanyId !== activeCompanyId) {
+    invalidateDatabaseCache();
+  }
+
   const now = Date.now();
-  if (!forceRefresh && cachedDbState && (now - lastDbFetchTime < CACHE_TTL_MS)) {
+  if (!forceRefresh && cachedDbState && cachedCompanyId === activeCompanyId && (now - lastDbFetchTime < CACHE_TTL_MS)) {
     return cachedDbState;
   }
 
@@ -587,7 +597,7 @@ export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<Ful
     const existingEquipe = getLocalFallback('gestimmo_equipe');
     const existingIncidents = getLocalFallback('gestimmo_incidents');
 
-    const [rawOwners, rawProperties, rawUnits, rawTenants, rawLeases, rawPayments, rawPayouts, rawIncidents, rawNotices, rawProfiles] = await Promise.all([
+    const [allOwners, allProperties, allUnits, allTenants, allLeases, allPayments, allPayouts, allIncidents, allNotices, allProfiles] = await Promise.all([
       fetchOwners(),
       fetchProperties(),
       fetchUnits(),
@@ -599,6 +609,42 @@ export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<Ful
       fetchLeaseNotices(),
       fetchProfiles()
     ]);
+
+    // Filtrage strict par agence (Multi-Tenant Isolation) :
+    // Une nouvelle agence ne voit QUE ses propres données (company_id === activeCompanyId)
+    const belongsToCompany = (rowCompanyId?: string | null) => {
+      if (isMainCompany) {
+        return !rowCompanyId || rowCompanyId === DEFAULT_COMPANY_ID;
+      }
+      return rowCompanyId === activeCompanyId;
+    };
+
+    const rawOwners = allOwners.filter((o) => belongsToCompany(o.company_id));
+    const rawProperties = allProperties.filter((p) => belongsToCompany(p.company_id));
+    const allowedPropertyIds = new Set(rawProperties.map((p) => p.id));
+    const rawUnits = allUnits.filter(
+      (u) =>
+        (u.property_id && allowedPropertyIds.has(u.property_id)) ||
+        belongsToCompany((u as any).company_id)
+    );
+    const rawTenants = allTenants.filter((t) => belongsToCompany(t.company_id));
+    const allowedTenantIds = new Set(rawTenants.map((t) => t.id));
+    const allowedUnitIds = new Set(rawUnits.map((u) => u.id));
+    const rawLeases = allLeases.filter(
+      (l) =>
+        belongsToCompany(l.company_id) ||
+        (!l.company_id && isMainCompany) ||
+        (l.unit_id && allowedUnitIds.has(l.unit_id) && l.tenant_id && allowedTenantIds.has(l.tenant_id))
+    );
+    const rawPayments = allPayments.filter(
+      (pm) =>
+        belongsToCompany(pm.company_id) ||
+        (!pm.company_id && isMainCompany)
+    );
+    const rawPayouts = allPayouts.filter((po) => belongsToCompany(po.company_id));
+    const rawIncidents = allIncidents.filter((inc) => belongsToCompany(inc.company_id));
+    const rawNotices = allNotices.filter((n) => belongsToCompany(n.company_id));
+    const rawProfiles = allProfiles.filter((pr) => belongsToCompany(pr.company_id));
 
     // Map Owners (preserving login, password and accountStatus)
     const owners = rawOwners.map((o) => {
@@ -1198,7 +1244,7 @@ export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<Ful
       if (isSupabaseConfigured()) {
         (supabase.from("companies") as any)
           .select("*")
-          .eq("id", DEFAULT_COMPANY_ID)
+          .eq("id", activeCompanyId)
           .maybeSingle()
           .then(({ data }: any) => {
             if (data && typeof window !== "undefined") {
@@ -1224,6 +1270,7 @@ export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<Ful
     }
 
       cachedDbState = state;
+      cachedCompanyId = activeCompanyId;
       lastDbFetchTime = Date.now();
       return state;
     } catch (err) {

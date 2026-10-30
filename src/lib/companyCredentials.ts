@@ -18,6 +18,8 @@ export interface UserPermissionRights {
 
 export interface UserAccount {
   id: string;
+  companyId?: string;
+  companyName?: string;
   name: string;
   email: string;
   phone: string;
@@ -136,6 +138,8 @@ export function getCompanyUsers(): UserAccount[] {
         // Normalize loaded users
         const normalized: UserAccount[] = parsed.map((u: any, idx: number) => ({
           id: u.id || `USR-${String(idx + 1).padStart(3, "0")}`,
+          companyId: u.companyId || u.company_id || undefined,
+          companyName: u.companyName || undefined,
           name: u.name || "Utilisateur",
           email: u.email || "",
           phone: u.phone || "",
@@ -353,6 +357,24 @@ export function authenticateCompanyUser(loginInput: string, passwordInput: strin
 
     if (isPasswordValid) {
       saveStoredVaultCredential(matchedUser.id, "password", storedPass);
+      // Si l'utilisateur correspond à une agence SaaS mais n'avait pas encore de companyId, on lui rattache
+      if (!matchedUser.companyId) {
+        try {
+          const rawAg = localStorage.getItem("gestimmo_saas_agencies");
+          if (rawAg) {
+            const agList: any[] = JSON.parse(rawAg);
+            const foundAg = agList.find(
+              (a) =>
+                (a.email || "").trim().toLowerCase() === (matchedUser.email || "").trim().toLowerCase() ||
+                (a.login || "").trim().toLowerCase() === (matchedUser.login || "").trim().toLowerCase()
+            );
+            if (foundAg) {
+              matchedUser.companyId = foundAg.id;
+              matchedUser.companyName = foundAg.name;
+            }
+          }
+        } catch (e) {}
+      }
       return matchedUser;
     }
   }
@@ -371,6 +393,8 @@ export function authenticateCompanyUser(loginInput: string, passwordInput: strin
       if (matchedAgency && passwordInput.trim() === (matchedAgency.password || "").trim()) {
         return {
           id: matchedAgency.id,
+          companyId: matchedAgency.id,
+          companyName: matchedAgency.name,
           name: matchedAgency.adminName || matchedAgency.name,
           email: matchedAgency.email,
           phone: matchedAgency.phone || "",

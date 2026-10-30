@@ -131,31 +131,38 @@ const initialDefaultMessages: UserMessage[] = [
   }
 ];
 
+import { getActiveCompanyId, DEFAULT_MAIN_COMPANY_ID } from "./authSession";
+
 export function getStoredMessages(): UserMessage[] {
-  if (typeof window === "undefined") return initialDefaultMessages;
+  if (typeof window === "undefined") return [];
+
+  const isMainCompany = getActiveCompanyId() === DEFAULT_MAIN_COMPANY_ID;
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(initialDefaultMessages));
-      return initialDefaultMessages;
+      const seed = isMainCompany ? initialDefaultMessages : [];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+      return seed;
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      const hasKoreMsg = parsed.some((m: any) => m.id === "msg-kore-retard-01" || (m.recipientName && m.recipientName.toUpperCase().includes("KORE")));
-      if (!hasKoreMsg) {
-        const koreMsg = initialDefaultMessages.find((m) => m.id === "msg-kore-retard-01");
-        if (koreMsg) {
-          parsed.unshift(koreMsg);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+      if (isMainCompany) {
+        const hasKoreMsg = parsed.some((m: any) => m.id === "msg-kore-retard-01" || (m.recipientName && m.recipientName.toUpperCase().includes("KORE")));
+        if (!hasKoreMsg) {
+          const koreMsg = initialDefaultMessages.find((m) => m.id === "msg-kore-retard-01");
+          if (koreMsg) {
+            parsed.unshift(koreMsg);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+          }
         }
       }
       return parsed;
     }
-    return initialDefaultMessages;
+    return isMainCompany ? initialDefaultMessages : [];
   } catch (e) {
     console.error("Error reading stored messages:", e);
-    return initialDefaultMessages;
+    return [];
   }
 }
 

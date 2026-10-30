@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Building, User, Mail, Phone, Lock } from "lucide-react";
-import { createProfile } from "@/lib/dataService";
+import { createProfile, invalidateDatabaseCache } from "@/lib/dataService";
 import { registerNewSaaSAgency } from "@/lib/superAdminService";
 import { setPortalSession } from "@/lib/authSession";
 import { getDefaultPermissions } from "@/lib/companyCredentials";
@@ -47,6 +47,7 @@ export default function InscriptionPage() {
           permissions: { all: true },
         });
 
+        invalidateDatabaseCache();
         setPortalSession("ADMIN", {
           id: createdAgency.id,
           companyId: createdAgency.id,

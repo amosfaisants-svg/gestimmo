@@ -11,7 +11,7 @@ import {
 import Link from "next/link";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
-import { createLeaseNotice, updateLeaseNotice, updateLease, updateUnit } from "@/lib/dataService";
+import { createLeaseNotice, updateLeaseNotice, updateLease, updateUnit, loadAllDataFromDatabase } from "@/lib/dataService";
 import { formatUnitDisplay } from "@/lib/utils";
 
 const formatFCFA = (amount: number | string) => {

@@ -13,6 +13,116 @@ export interface AuthSessionUser {
 }
 
 const VAULT_STORAGE_KEY = "gestimmo_credentials_vault";
+export const DEFAULT_MAIN_COMPANY_ID = "11111111-1111-1111-1111-111111111111";
+
+const COMPANY_SCOPED_KEYS = [
+  "gestimmo_proprietaires",
+  "gestimmo_biens",
+  "gestimmo_logements",
+  "gestimmo_locataires",
+  "gestimmo_baux",
+  "gestimmo_paiements",
+  "gestimmo_reversements",
+  "gestimmo_incidents",
+  "gestimmo_preavis",
+  "gestimmo_equipe",
+  "gestimmo_notifications",
+  "gestimmo_messages",
+  "gestimmo_company_info",
+];
+
+/**
+ * Retourne l'identifiant (UUID) de l'agence actuellement connectée.
+ */
+export function getActiveCompanyId(): string {
+  if (typeof window === "undefined") return DEFAULT_MAIN_COMPANY_ID;
+  try {
+    const tabUserStr = sessionStorage.getItem("gestimmo_tab_user");
+    if (tabUserStr) {
+      const u = JSON.parse(tabUserStr);
+      if (u?.companyId) return u.companyId;
+      if (u?.company_id) return u.company_id;
+    }
+    const activeId = localStorage.getItem("gestimmo_active_company_id");
+    if (activeId) return activeId;
+
+    const adminUserStr = localStorage.getItem("gestimmo_admin_user");
+    if (adminUserStr) {
+      const u = JSON.parse(adminUserStr);
+      if (u?.companyId) return u.companyId;
+      if (u?.company_id) return u.company_id;
+    }
+  } catch (e) {}
+  return DEFAULT_MAIN_COMPANY_ID;
+}
+
+/**
+ * Isole les données localStorage entre les différentes agences immobilières.
+ * Sauvegarde le cache de l'agence précédente et charge celui de la nouvelle agence (ou vide si nouvelle agence).
+ */
+export function switchCompanyWorkspace(newCompanyId: string, companyMetadata?: { name?: string; email?: string; phone?: string; address?: string }): void {
+  if (typeof window === "undefined" || !newCompanyId) return;
+
+  try {
+    const previousCompanyId = localStorage.getItem("gestimmo_active_company_id") || DEFAULT_MAIN_COMPANY_ID;
+
+    // 1. Sauvegarder les clés actuelles dans le snapshot de l'agence précédente
+    if (previousCompanyId) {
+      const snapshot: Record<string, string | null> = {};
+      COMPANY_SCOPED_KEYS.forEach((key) => {
+        snapshot[key] = localStorage.getItem(key);
+      });
+      localStorage.setItem(`gestimmo_workspace_${previousCompanyId}`, JSON.stringify(snapshot));
+    }
+
+    // 2. Activer le nouvel identifiant d'agence
+    localStorage.setItem("gestimmo_active_company_id", newCompanyId);
+
+    // 3. Charger le snapshot de la nouvelle agence (ou initialiser un espace vierge si c'est une nouvelle agence)
+    const targetSnapshotRaw = localStorage.getItem(`gestimmo_workspace_${newCompanyId}`);
+    if (targetSnapshotRaw) {
+      const targetSnapshot = JSON.parse(targetSnapshotRaw);
+      COMPANY_SCOPED_KEYS.forEach((key) => {
+        if (targetSnapshot[key] !== undefined && targetSnapshot[key] !== null) {
+          localStorage.setItem(key, targetSnapshot[key]);
+        } else if (key === "gestimmo_company_info") {
+          localStorage.setItem(
+            key,
+            JSON.stringify({
+              name: companyMetadata?.name || "Nouvelle Agence",
+              email: companyMetadata?.email || "",
+              phone: companyMetadata?.phone || "",
+              address: companyMetadata?.address || "Abidjan, Côte d'Ivoire",
+              logo: "",
+            })
+          );
+        } else {
+          localStorage.setItem(key, JSON.stringify([]));
+        }
+      });
+    } else if (newCompanyId !== DEFAULT_MAIN_COMPANY_ID) {
+      // Nouvelle agence : démarrer avec une base de données 100 % vierge !
+      COMPANY_SCOPED_KEYS.forEach((key) => {
+        if (key === "gestimmo_company_info") {
+          localStorage.setItem(
+            key,
+            JSON.stringify({
+              name: companyMetadata?.name || "Mon Agence Immobilière",
+              email: companyMetadata?.email || "",
+              phone: companyMetadata?.phone || "",
+              address: companyMetadata?.address || "Abidjan, Côte d'Ivoire",
+              logo: "",
+            })
+          );
+        } else {
+          localStorage.setItem(key, JSON.stringify([]));
+        }
+      });
+    }
+  } catch (e) {
+    console.error("Erreur lors du changement d'espace agence:", e);
+  }
+}
 
 /**
  * Normalizes identifier key for the credentials vault (case-insensitive, trimmed)
@@ -130,6 +240,12 @@ export function setPortalSession(portal: PortalType, user: any, role?: string): 
       localStorage.setItem("gestimmo_super_admin_user", userJson);
       localStorage.setItem("gestimmo_super_admin_role", "SUPER_ADMIN");
     } else if (portal === 'ADMIN') {
+      const targetCompanyId = user.companyId || user.company_id || DEFAULT_MAIN_COMPANY_ID;
+      switchCompanyWorkspace(targetCompanyId, {
+        name: user.companyName || (targetCompanyId === DEFAULT_MAIN_COMPANY_ID ? "ImmoGestion Pro" : user.name),
+        email: user.email,
+        phone: user.phone,
+      });
       localStorage.setItem("gestimmo_admin_user", userJson);
       localStorage.setItem("gestimmo_admin_role", actualRole);
     } else if (portal === 'LOCATAIRE') {
