@@ -41,6 +41,25 @@ export const formatMessageDate = (date: Date): string => {
 
 const initialDefaultMessages: UserMessage[] = [
   {
+    id: "msg-kore-retard-01",
+    senderName: "Direction GESTIMMO",
+    senderRole: "Service Gestion Locative",
+    recipientType: "locataire",
+    recipientId: "7be6d1fd-564b-4752-a149-4f3ccece69f2",
+    recipientName: "KORE MOÏSE",
+    recipientEmail: "",
+    recipientPhone: "0798346597",
+    recipientUnit: "Appartement A11",
+    subject: "Avis d'impayé : Retard de loyer de 6 mois (960 000 F CFA)",
+    content: "Bonjour M. KORE MOÏSE,\n\nSauf erreur ou omission de notre part, nous constatons qu'aucun règlement de loyer n'a été enregistré pour votre logement (Appartement A11 - Résidence A LIMMEUBLE) depuis votre dernier paiement correspondant au mois d'Avril 2026.\n\nAu vu de la période d'échéance en cours correspondant à la date d'aujourd'hui (Octobre 2026), votre dossier présente un retard de paiement caractérisé :\n• Retard en mois : 6 mois d'arriérés (Mai 2026, Juin 2026, Juillet 2026, Août 2026, Septembre 2026 et Octobre 2026)\n• Retard en jours : 176 jours de retard cumulés (depuis l'échéance du 5 mai 2026)\n• Montant total impayé : 960 000 F CFA (soit 6 mois × 160 000 F CFA)\n\nNous vous prions de bien vouloir régulariser votre situation sans délai via votre espace locataire en ligne ou en contactant notre service gestion au 01 02 03 04 05.\n\nDirection GESTIMMO",
+    priority: "urgent",
+    status: "envoyé",
+    sentAt: new Date().toISOString(),
+    sentDateFormatted: "Aujourd'hui à 10:00",
+    readAt: null,
+    readDateFormatted: null,
+  },
+  {
     id: "msg-101",
     senderName: "Kouassi Jean-Philippe",
     senderRole: "Administrateur",
@@ -123,6 +142,14 @@ export function getStoredMessages(): UserMessage[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
+      const hasKoreMsg = parsed.some((m: any) => m.id === "msg-kore-retard-01" || (m.recipientName && m.recipientName.toUpperCase().includes("KORE")));
+      if (!hasKoreMsg) {
+        const koreMsg = initialDefaultMessages.find((m) => m.id === "msg-kore-retard-01");
+        if (koreMsg) {
+          parsed.unshift(koreMsg);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
       return parsed;
     }
     return initialDefaultMessages;

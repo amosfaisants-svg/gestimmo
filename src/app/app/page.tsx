@@ -32,7 +32,7 @@ import {
 import Link from "next/link";
 import { usePermissions } from "@/hooks/usePermissions";
 import { loadAllDataFromDatabase, deleteIncident, updateIncident } from "@/lib/dataService";
-import { formatUnitDisplay, isUUID, cn, syncPaymentsWithLeases, sortPaymentsDesc, comparePaymentsDesc, formatPaymentDateDisplay, getIncidentDisplayCode, checkTenantHasImportedContract } from "@/lib/utils";
+import { formatUnitDisplay, isUUID, cn, syncPaymentsWithLeases, sortPaymentsDesc, comparePaymentsDesc, formatPaymentDateDisplay, getIncidentDisplayCode, checkTenantHasImportedContract, calculateTenantDelay } from "@/lib/utils";
 import { getPortalSession } from "@/lib/authSession";
 import { isImageFile, getFileSource, compressImageFile } from "@/lib/imageCompressor";
 import { IncidentDetailModal } from "@/components/ui/IncidentDetailModal";
@@ -764,18 +764,28 @@ export default function Dashboard() {
     );
     const gerantLateTenants = activeLocataires.filter((t: any) => 
       (managedUnitKeys.has(t.unit) || gerantBauxList.some((b: any) => b.tenant === t.name)) &&
-      (t.status === "EN RETARD" || t.status === "IMPAYÉ")
+      (t.status === "EN RETARD" || t.status === "IMPAYÉ" || (Number(t.unpaidMonths) > 0))
     );
     const gerantOverdueUnits = new Set([
       ...gerantLatePayments.map((p: any) => p.unit),
       ...gerantLateTenants.map((t: any) => t.unit),
     ]);
+    gerantBauxList.forEach((b: any) => {
+      const delay = calculateTenantDelay({ id: b.tenantId || b.tenant_id, name: b.tenant }, b, gerantPaiementsList);
+      if (delay.isOverdue) {
+        gerantOverdueUnits.add(b.unit);
+      }
+    });
     const gerantRetardsCount = Math.max(gerantOverdueUnits.size, gerantLatePayments.length, gerantLateTenants.length);
-    let gerantRetardsAmount = gerantLatePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    let gerantRetardsAmount = gerantLateTenants.reduce((sum, t) => sum + (Number(t.unpaidAmount || t.rent) || 0), 0) ||
+      gerantLatePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
     if (gerantRetardsAmount === 0 && gerantRetardsCount > 0) {
       gerantRetardsAmount = gerantBauxList
         .filter((b: any) => gerantOverdueUnits.has(b.unit) || gerantLateTenants.some((t: any) => t.name === b.tenant))
-        .reduce((sum, b) => sum + (Number(b.rent || b.loyer) || 0), 0);
+        .reduce((sum, b) => {
+          const delay = calculateTenantDelay({ id: b.tenantId || b.tenant_id, name: b.tenant }, b, gerantPaiementsList);
+          return sum + (delay.isOverdue && delay.unpaidAmount > 0 ? delay.unpaidAmount : (Number(b.rent || b.loyer) || 0));
+        }, 0);
     }
     if (gerantRetardsAmount === 0 && targetRentMonth > collectedMonth) {
       gerantRetardsAmount = targetRentMonth - collectedMonth;
@@ -1142,27 +1152,33 @@ export default function Dashboard() {
             (p.status === "EN RETARD" || p.status === "IMPAYÉ" || p.status === "REJETÉ")
           );
 
-          // Tous les locataires marqués EN RETARD ou IMPAYÉ
+          // Tous les locataires marqués EN RETARD ou IMPAYÉ (ou retard dynamique détecté)
           const lateLocatairesAll = activeLocataires.filter((t: any) => 
             matchesAllFilters(t, false) && 
-            (t.status === "EN RETARD" || t.status === "IMPAYÉ")
+            (t.status === "EN RETARD" || t.status === "IMPAYÉ" || (Number(t.unpaidMonths) > 0))
           );
 
           // Baux actifs en retard ou associés à un locataire/paiement en retard
-          const lateBauxAll = filteredBaux.filter((b: any) => 
-            b.status === "EN RETARD" ||
-            lateLocatairesAll.some((t: any) => t.name && b.tenant && t.name.trim().toLowerCase() === b.tenant.trim().toLowerCase()) ||
-            latePaiementsAll.some((p: any) => p.tenant && b.tenant && p.tenant.trim().toLowerCase() === b.tenant.trim().toLowerCase())
-          );
+          const lateBauxAll = filteredBaux.filter((b: any) => {
+            if (b.status === "EN RETARD") return true;
+            if (lateLocatairesAll.some((t: any) => (t.id && b.tenantId && t.id === b.tenantId) || (t.name && b.tenant && t.name.trim().toLowerCase() === b.tenant.trim().toLowerCase()))) return true;
+            if (latePaiementsAll.some((p: any) => (p.tenant && b.tenant && p.tenant.trim().toLowerCase() === b.tenant.trim().toLowerCase()))) return true;
+            const delay = calculateTenantDelay({ id: b.tenantId || b.tenant_id, name: b.tenant }, b, activePaiements);
+            return delay.isOverdue;
+          });
 
           const retardsKeys = new Set([
             ...latePaiementsAll.map((p: any) => p.id || p.tenant),
             ...lateLocatairesAll.map((t: any) => t.id || t.name),
             ...lateBauxAll.map((b: any) => b.id || b.tenant),
           ]);
-          const retardsCount = Math.max(retardsKeys.size, latePaiementsAll.length, lateLocatairesAll.length);
-          const retardsTotalMontant = latePaiementsAll.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0) ||
-            lateBauxAll.reduce((sum: number, b: any) => sum + (Number(b.rent || b.loyer) || 0), 0);
+          const retardsCount = Math.max(retardsKeys.size, latePaiementsAll.length, lateLocatairesAll.length, lateBauxAll.length);
+          const retardsTotalMontant = lateLocatairesAll.reduce((sum: number, t: any) => sum + (Number(t.unpaidAmount || t.rent) || 0), 0) ||
+            lateBauxAll.reduce((sum: number, b: any) => {
+              const delay = calculateTenantDelay({ id: b.tenantId || b.tenant_id, name: b.tenant }, b, activePaiements);
+              return sum + (delay.isOverdue && delay.unpaidAmount > 0 ? delay.unpaidAmount : (Number(b.rent || b.loyer) || 0));
+            }, 0) ||
+            latePaiementsAll.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
 
           const locatairesSansContrat = activeLocataires.filter((t: any) => {
             if (!matchesAllFilters(t, false)) return false;

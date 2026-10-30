@@ -9,7 +9,7 @@ import { ensureTenantCredentials, TenantCredential } from "@/lib/tenantCredentia
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
 import { loadAllDataFromDatabase, createTenant, updateTenant, deleteTenant } from "@/lib/dataService";
-import { formatUnitDisplay, checkTenantHasImportedContract } from "@/lib/utils";
+import { formatUnitDisplay, checkTenantHasImportedContract, calculateTenantDelay } from "@/lib/utils";
 
 const formatFCFA = (amount: number | string) => {
   if (typeof amount === "string") return amount;
@@ -259,28 +259,8 @@ function LocatairesPageInner() {
       dynamicProperty = activeLease.property;
       dynamicRent = activeLease.rent;
       
-      const frenchMonths = ["janv", "févr", "mars", "avril", "mai", "juin", "juil", "août", "sept", "oct", "nov", "déc"];
-      const parts = activeLease.start ? activeLease.start.toLowerCase().replace(/\./g, '').split(' ') : [];
-      let elapsedMonths = 0;
-      if (parts.length >= 3) {
-        const monthIndex = frenchMonths.findIndex(m => parts[1].startsWith(m));
-        if (monthIndex !== -1) {
-          const startYear = parseInt(parts[2]);
-          const now = new Date();
-          elapsedMonths = (now.getFullYear() - startYear) * 12 + (now.getMonth() - monthIndex) + 1;
-        }
-      }
-      
-      const validPayments = paiements.filter(p => 
-        p.tenant && tenant.name && p.tenant.trim().toLowerCase() === tenant.name.trim().toLowerCase() && 
-        (p.status === "VALIDÉ" || p.status === "PAYÉ") &&
-        p.period &&
-        !p.period.toLowerCase().includes("entrée") &&
-        !p.period.toLowerCase().includes("avance") &&
-        !p.period.toLowerCase().includes("caution")
-      ).length;
-      
-      unpaidMonths = Math.max(0, elapsedMonths - validPayments);
+      const delayInfo = calculateTenantDelay(tenant, activeLease, paiements);
+      unpaidMonths = delayInfo.unpaidMonths;
 
       if (unpaidMonths === 0) {
         dynamicStatus = "PAYÉ";

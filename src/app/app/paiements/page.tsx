@@ -8,7 +8,7 @@ import Link from "next/link";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
 import { loadAllDataFromDatabase, createPayment, deletePayment } from "@/lib/dataService";
-import { formatUnitDisplay, getPaymentDisplayCode, getLeaseDisplayCode, syncPaymentsWithLeases, sortPaymentsDesc, comparePaymentsDesc } from "@/lib/utils";
+import { formatUnitDisplay, getPaymentDisplayCode, getLeaseDisplayCode, syncPaymentsWithLeases, sortPaymentsDesc, comparePaymentsDesc, calculateTenantDelay } from "@/lib/utils";
 
 const formatFCFA = (amount: number | string) => {
   if (typeof amount === "string") return amount;
@@ -541,31 +541,42 @@ function PaymentsPageInner() {
 
   const overdueVirtualRows = leases
     .filter((lease: any) => {
-      const hasAnyPayment = payments.some((p: any) => 
-        ((p.tenant && lease.tenant && p.tenant.trim().toLowerCase() === lease.tenant.trim().toLowerCase()) ||
-         (p.unit && lease.unit && p.unit.trim().toLowerCase() === lease.unit.trim().toLowerCase()))
-      );
-
       const tenant = tenants.find((t: any) => 
+        (t.id && lease.tenantId && t.id === lease.tenantId) ||
         (t.name && lease.tenant && t.name.trim().toLowerCase() === lease.tenant.trim().toLowerCase()) ||
         (t.unit && lease.unit && t.unit.trim().toLowerCase() === lease.unit.trim().toLowerCase())
       );
-      const isTenantOverdue = tenant && (tenant.status === "EN RETARD" || tenant.status === "IMPAYÉ");
-
-      return isTenantOverdue || !hasAnyPayment;
+      const isTenantDirectLate = tenant && (tenant.status === "EN RETARD" || tenant.status === "IMPAYÉ" || (Number(tenant.unpaidMonths) > 0));
+      const delayInfo = calculateTenantDelay(tenant || { id: lease.tenantId || lease.tenant_id, name: lease.tenant }, lease, payments);
+      return isTenantDirectLate || delayInfo.isOverdue;
     })
-    .map((lease: any) => ({
-      id: `RETARD-${lease.id}`,
-      tenant: lease.tenant,
-      unit: lease.unit,
-      date: "-",
-      period: currentMonthCapitalized,
-      amount: lease.rent,
-      method: "-",
-      status: "EN RETARD",
-      isVirtual: true,
-      leaseId: lease.id,
-    }));
+    .map((lease: any) => {
+      const tenant = tenants.find((t: any) => 
+        (t.id && lease.tenantId && t.id === lease.tenantId) ||
+        (t.name && lease.tenant && t.name.trim().toLowerCase() === lease.tenant.trim().toLowerCase()) ||
+        (t.unit && lease.unit && t.unit.trim().toLowerCase() === lease.unit.trim().toLowerCase())
+      );
+      const delayInfo = calculateTenantDelay(tenant || { id: lease.tenantId || lease.tenant_id, name: lease.tenant }, lease, payments);
+      const periodLabel = delayInfo.unpaidPeriods.length > 0
+        ? `${delayInfo.unpaidPeriods[0]} à ${delayInfo.unpaidPeriods[delayInfo.unpaidPeriods.length - 1]} (${delayInfo.unpaidMonths} mois)`
+        : currentMonthCapitalized;
+
+      return {
+        id: `RETARD-${lease.id}`,
+        tenant: lease.tenant,
+        unit: lease.unit,
+        date: "-",
+        period: periodLabel,
+        amount: delayInfo.unpaidAmount > 0 ? delayInfo.unpaidAmount : lease.rent,
+        monthlyRent: lease.rent,
+        method: "-",
+        status: "EN RETARD",
+        isVirtual: true,
+        leaseId: lease.id,
+        unpaidMonths: delayInfo.unpaidMonths,
+        delayDays: delayInfo.delayDays,
+      };
+    });
 
   // ─── Filtre sur les paiements réels & virtuels ──────────────────────────────
   const isRetardFilter = statusFilter === "EN RETARD" || statusFilter === "En retard";

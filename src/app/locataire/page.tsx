@@ -6,7 +6,7 @@ import { CreditCard, FileText, AlertTriangle, ArrowRight, Wallet, UserCheck, Clo
 import Link from "next/link";
 import { checkAndAutoRenewLeases } from "@/lib/leaseRenewal";
 import { loadAllDataFromDatabase } from "@/lib/dataService";
-import { formatUnitDisplay, getIncidentDisplayCode } from "@/lib/utils";
+import { formatUnitDisplay, getIncidentDisplayCode, calculateTenantDelay } from "@/lib/utils";
 import { getPortalSession } from "@/lib/authSession";
 import { TenantPaymentModal } from "@/components/ui/TenantPaymentModal";
 import { IncidentDetailModal } from "@/components/ui/IncidentDetailModal";
@@ -81,6 +81,7 @@ export default function LocataireDashboard() {
   const [messagesList, setMessagesList] = useState<UserMessage[]>([]);
   const [selectedMessageForModal, setSelectedMessageForModal] = useState<UserMessage | null>(null);
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [tenantDelay, setTenantDelay] = useState<any>(null);
 
   useEffect(() => {
     const initData = async () => {
@@ -177,6 +178,10 @@ export default function LocataireDashboard() {
     const nextMonthName = MONTH_NAMES_FR[nextM - 1];
     setNextRentDate(`10 ${nextMonthName} ${nextY}`);
     setNextRentPeriod(`${nextMonthName} ${nextY}`);
+
+    // Calcul dynamique de l'état des arriérés / retards de loyer du locataire
+    const delay = calculateTenantDelay(user || { name: nameToMatch }, lease, payments);
+    setTenantDelay(delay);
 
     // Read reported incidents for this tenant
     const storedIncidents = localStorage.getItem("gestimmo_incidents");
@@ -463,32 +468,83 @@ export default function LocataireDashboard() {
         </div>
       )}
 
+      {/* Bannière d'alerte en cas de retard de loyer */}
+      {tenantDelay?.isOverdue && (
+        <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-red-950 shadow-sm animate-in fade-in duration-200">
+          <div className="flex items-start sm:items-center gap-4">
+            <div className="p-3 bg-red-100 rounded-2xl text-red-600 shrink-0">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-bold uppercase tracking-wider text-red-700">Alerte Impayé de Loyer</span>
+                <Badge variant="alert" dot className="bg-red-600 text-white font-bold">
+                  {tenantDelay.unpaidMonths} mois de retard ({tenantDelay.delayDays} jours)
+                </Badge>
+              </div>
+              <p className="text-base font-bold text-red-900">
+                Montant total exigible : <span className="underline decoration-red-400">{formatFCFA(tenantDelay.unpaidAmount)}</span>
+              </p>
+              <p className="text-xs text-red-700">
+                Dernier loyer acquitté : <strong className="font-semibold">{tenantDelay.lastPaidPeriod || "Avril 2026"}</strong> • Périodes impayées : <strong className="font-semibold">{tenantDelay.unpaidPeriods.join(", ")}</strong>.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsPaymentModalOpen(true)}
+            className="bg-red-600 text-white text-xs font-bold px-5 py-3 rounded-xl hover:bg-red-700 transition-all flex items-center justify-center gap-2 shrink-0 shadow-sm cursor-pointer whitespace-nowrap"
+          >
+            <CreditCard className="w-4 h-4" /> Régulariser l'impayé
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Main Payment Card */}
-        <div className="lg:col-span-2 bg-gradient-to-br from-primary to-blue-800 rounded-2xl p-8 text-white shadow-md relative overflow-hidden flex flex-col justify-between min-h-[240px]">
+        <div className={`lg:col-span-2 rounded-2xl p-8 text-white shadow-md relative overflow-hidden flex flex-col justify-between min-h-[240px] ${
+          tenantDelay?.isOverdue
+            ? "bg-gradient-to-br from-red-600 via-rose-700 to-red-900"
+            : "bg-gradient-to-br from-primary to-blue-800"
+        }`}>
           <div className="absolute top-0 right-0 p-8 opacity-10">
             <Wallet className="w-48 h-48 -mr-10 -mt-10" />
           </div>
           
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-2">
-              <Badge variant="success" className="bg-white/20 text-white border-none backdrop-blur-sm">À JOUR</Badge>
+              {tenantDelay?.isOverdue ? (
+                <Badge variant="alert" dot className="bg-white/20 text-white border-none backdrop-blur-sm font-bold">
+                  EN RETARD ({tenantDelay.unpaidMonths} MOIS)
+                </Badge>
+              ) : (
+                <Badge variant="success" className="bg-white/20 text-white border-none backdrop-blur-sm">À JOUR</Badge>
+              )}
             </div>
-            <h2 className="text-sm font-medium text-blue-100 uppercase tracking-wider mt-4">Prochain loyer à régler</h2>
+            <h2 className="text-sm font-medium text-white/90 uppercase tracking-wider mt-4">
+              {tenantDelay?.isOverdue ? "Loyer impayé à régulariser" : "Prochain loyer à régler"}
+            </h2>
             <div className="flex items-end gap-3 mt-1">
-              <span className="text-4xl sm:text-5xl font-bold">{formatFCFA(rentAmount)}</span>
+              <span className="text-4xl sm:text-5xl font-bold">
+                {formatFCFA(tenantDelay?.isOverdue ? tenantDelay.unpaidAmount : rentAmount)}
+              </span>
             </div>
-            <p className="text-sm text-blue-100 mt-2">Avant le {nextRentDate}</p>
+            <p className="text-sm text-white/90 mt-2">
+              {tenantDelay?.isOverdue
+                ? `Retard de ${tenantDelay.delayDays} jours • Périodes : ${tenantDelay.unpaidPeriods[0]} à ${tenantDelay.unpaidPeriods[tenantDelay.unpaidPeriods.length - 1]}`
+                : `Avant le ${nextRentDate}`}
+            </p>
           </div>
 
           <div className="relative z-10 mt-8 flex flex-col sm:flex-row gap-4">
             <button
               type="button"
               onClick={() => setIsPaymentModalOpen(true)}
-              className="bg-white text-primary px-6 py-3 rounded-xl font-bold shadow-md hover:bg-gray-50 active:scale-95 transition-all flex items-center justify-center cursor-pointer group"
+              className="bg-white text-gray-900 px-6 py-3 rounded-xl font-bold shadow-md hover:bg-gray-50 active:scale-95 transition-all flex items-center justify-center cursor-pointer group"
             >
-              <CreditCard className="w-5 h-5 mr-2 group-hover:scale-110 transition-transform" /> Payer en ligne (Wave / Orange / MTN / Moov)
+              <CreditCard className="w-5 h-5 mr-2 group-hover:scale-110 transition-transform text-primary" />
+              {tenantDelay?.isOverdue ? "Régulariser mon impayé en ligne (Wave / Orange / MTN / Moov)" : "Payer en ligne (Wave / Orange / MTN / Moov)"}
             </button>
           </div>
         </div>

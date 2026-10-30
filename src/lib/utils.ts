@@ -600,4 +600,176 @@ export const isUnitOccupied = (unit: any, allLeases: any[] = []): boolean => {
   return false;
 };
 
+export const MONTH_NAMES_FR = [
+  "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+  "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
+];
+
+export interface TenantDelayInfo {
+  isOverdue: boolean;
+  unpaidMonths: number;
+  unpaidAmount: number;
+  unpaidPeriods: string[];
+  lastPaidPeriod: string;
+  delayDays: number;
+  currentPeriod: string;
+  monthlyRent: number;
+}
+
+export const calculateTenantDelay = (
+  tenant: any,
+  lease: any,
+  payments: any[] = [],
+  referenceDate: Date = new Date()
+): TenantDelayInfo => {
+  if (!lease || (lease.status && lease.status.toString().toUpperCase() !== "ACTIF")) {
+    return {
+      isOverdue: false,
+      unpaidMonths: 0,
+      unpaidAmount: 0,
+      unpaidPeriods: [],
+      lastPaidPeriod: "",
+      delayDays: 0,
+      currentPeriod: "",
+      monthlyRent: 0,
+    };
+  }
+
+  const rentVal = Number(lease.rent_amount || lease.rent || lease.loyer || (tenant ? tenant.rent : 0)) || 0;
+  const chargesVal = Number(lease.charges_amount || lease.charges || 0) || 0;
+  const monthlyRent = rentVal + chargesVal;
+
+  const startRaw = lease.start_date || lease.startDate || lease.start;
+  if (!startRaw) {
+    return {
+      isOverdue: false,
+      unpaidMonths: 0,
+      unpaidAmount: 0,
+      unpaidPeriods: [],
+      lastPaidPeriod: "",
+      delayDays: 0,
+      currentPeriod: "",
+      monthlyRent,
+    };
+  }
+
+  let startDate: Date;
+  if (startRaw instanceof Date) {
+    startDate = startRaw;
+  } else {
+    const parsedTs = parsePaymentDateToTimestamp(startRaw);
+    startDate = parsedTs ? new Date(parsedTs) : new Date(startRaw);
+  }
+
+  if (isNaN(startDate.getTime())) {
+    return {
+      isOverdue: false,
+      unpaidMonths: 0,
+      unpaidAmount: 0,
+      unpaidPeriods: [],
+      lastPaidPeriod: "",
+      delayDays: 0,
+      currentPeriod: "",
+      monthlyRent,
+    };
+  }
+
+  const currentYear = referenceDate.getFullYear();
+  const currentMonth = referenceDate.getMonth(); // 0-indexed (9 for October)
+  const currentPeriod = `${MONTH_NAMES_FR[currentMonth]} ${currentYear}`;
+
+  const tId = (tenant?.id || lease.tenant_id || lease.tenantId || "").toString().toLowerCase().trim();
+  const tName = (tenant?.name || tenant?.full_name || lease.tenant || "").toString().trim().toLowerCase();
+  const lUnit = (lease.unit || (tenant ? tenant.unit : "") || "").toString().trim().toLowerCase();
+
+  const tenantPayments = (payments || []).filter((p: any) => {
+    if (!p) return false;
+    const pTenantId = (p.tenant_id || p.tenantId || "").toString().toLowerCase().trim();
+    const pTenantName = (p.tenant || "").toString().trim().toLowerCase();
+    const pUnit = (p.unit || "").toString().trim().toLowerCase();
+
+    const matchesTenant =
+      (tId && pTenantId && tId === pTenantId) ||
+      (tName && pTenantName && (tName === pTenantName || tName.includes(pTenantName) || pTenantName.includes(tName))) ||
+      (lUnit && pUnit && (lUnit === pUnit || lUnit.includes(pUnit) || pUnit.includes(lUnit)));
+
+    if (!matchesTenant) return false;
+
+    const st = (p.status || "").toString().toUpperCase();
+    const isValid = st === "PAYÉ" || st === "VALIDÉ";
+    if (!isValid) return false;
+
+    const periodStr = (p.period_month || p.period || p.type || "").toString().toLowerCase();
+    if (periodStr.includes("caution") || periodStr.includes("dépôt") || periodStr.includes("depot")) {
+      return false;
+    }
+
+    return true;
+  });
+
+  // Collect all months from lease start to referenceDate
+  const allMonths: { year: number; month: number; label: string; key: string }[] = [];
+  let iterY = startDate.getFullYear();
+  let iterM = startDate.getMonth(); // 0-indexed
+
+  while (iterY < currentYear || (iterY === currentYear && iterM <= currentMonth)) {
+    allMonths.push({
+      year: iterY,
+      month: iterM,
+      label: `${MONTH_NAMES_FR[iterM]} ${iterY}`,
+      key: `${iterY}-${String(iterM + 1).padStart(2, "0")}`,
+    });
+    iterM++;
+    if (iterM > 11) {
+      iterM = 0;
+      iterY++;
+    }
+  }
+
+  // Determine paid months
+  const paidSet = new Set<string>();
+  let lastPaidPeriod = "";
+  let lastPaidDate: Date | null = null;
+
+  tenantPayments.forEach((p: any) => {
+    const rawPeriod = (p.period_month || p.period || "").toString().trim();
+    for (const m of allMonths) {
+      const monthFr = MONTH_NAMES_FR[m.month].toLowerCase();
+      const rawLower = rawPeriod.toLowerCase();
+      if ((rawLower.includes(monthFr) || rawLower.includes(m.key)) && rawLower.includes(String(m.year))) {
+        paidSet.add(m.key);
+        const mDate = new Date(m.year, m.month, 1);
+        if (!lastPaidDate || mDate > lastPaidDate) {
+          lastPaidDate = mDate;
+          lastPaidPeriod = m.label;
+        }
+      }
+    }
+  });
+
+  const unpaidMonthsList = allMonths.filter((m) => !paidSet.has(m.key));
+  const unpaidMonths = unpaidMonthsList.length;
+  const isOverdue = unpaidMonths > 0;
+  const unpaidAmount = unpaidMonths * monthlyRent;
+  const unpaidPeriods = unpaidMonthsList.map((m) => m.label);
+
+  let delayDays = 0;
+  if (isOverdue && unpaidMonthsList.length > 0) {
+    const firstUnpaid = unpaidMonthsList[0];
+    const firstDueDate = new Date(firstUnpaid.year, firstUnpaid.month, 5); // 5th of first unpaid month
+    delayDays = Math.max(0, Math.floor((referenceDate.getTime() - firstDueDate.getTime()) / (1000 * 3600 * 24)));
+  }
+
+  return {
+    isOverdue,
+    unpaidMonths,
+    unpaidAmount,
+    unpaidPeriods,
+    lastPaidPeriod,
+    delayDays,
+    currentPeriod,
+    monthlyRent,
+  };
+};
+
 

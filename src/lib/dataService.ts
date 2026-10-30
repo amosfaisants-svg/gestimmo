@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import { Database } from './types/database';
 import { getStoredVaultCredential, saveStoredVaultCredential } from './authSession';
-import { sortPaymentsDesc } from './utils';
+import { sortPaymentsDesc, calculateTenantDelay } from './utils';
 
 export type OwnerRow = Database['public']['Tables']['owners']['Row'];
 export type PropertyRow = Database['public']['Tables']['properties']['Row'];
@@ -823,6 +823,19 @@ export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<Ful
       saveStoredVaultCredential(t.id, 'login', finalLogin);
       saveStoredVaultCredential(t.id, 'password', finalPass);
 
+      const delayInfo = calculateTenantDelay(
+        { id: t.id, name: t.full_name },
+        activeLease,
+        rawPayments
+      );
+
+      let computedStatus = "EN ATTENTE";
+      if (activeLease) {
+        computedStatus = delayInfo.isOverdue ? "EN RETARD" : "À JOUR";
+      } else if (localMatch?.status) {
+        computedStatus = localMatch.status;
+      }
+
       return {
         id: t.id,
         name: t.full_name,
@@ -832,7 +845,13 @@ export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<Ful
         unit: getCleanUnitLabel(activeLease?.unit_id, unitObj ? unitObj.unit_number : "-"),
         property: propObj ? propObj.name : "-",
         owner: ownerObj ? ownerObj.full_name : "-",
-        status: activeLease ? "À JOUR" : (localMatch?.status || "EN ATTENTE"),
+        status: computedStatus,
+        unpaidMonths: delayInfo.unpaidMonths,
+        unpaidAmount: delayInfo.unpaidAmount,
+        unpaidPeriods: delayInfo.unpaidPeriods,
+        lastPaidPeriod: delayInfo.lastPaidPeriod,
+        delayDays: delayInfo.delayDays,
+        rent: activeLease ? (Number(activeLease.rent_amount) || 0) : (localMatch?.rent || 0),
         login: finalLogin,
         password: finalPass,
         accountStatus: localMatch?.accountStatus || "Actif",
