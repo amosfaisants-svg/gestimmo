@@ -1,6 +1,6 @@
 "use client";
 
-export type PortalType = 'ADMIN' | 'LOCATAIRE' | 'PROPRIETAIRE';
+export type PortalType = 'SUPER_ADMIN' | 'ADMIN' | 'LOCATAIRE' | 'PROPRIETAIRE';
 
 export interface AuthSessionUser {
   id: string;
@@ -126,7 +126,10 @@ export function setPortalSession(portal: PortalType, user: any, role?: string): 
     sessionStorage.setItem("gestimmo_tab_role", actualRole);
 
     // 2. Portal-specific persistent storage (isolated per portal)
-    if (portal === 'ADMIN') {
+    if (portal === 'SUPER_ADMIN') {
+      localStorage.setItem("gestimmo_super_admin_user", userJson);
+      localStorage.setItem("gestimmo_super_admin_role", "SUPER_ADMIN");
+    } else if (portal === 'ADMIN') {
       localStorage.setItem("gestimmo_admin_user", userJson);
       localStorage.setItem("gestimmo_admin_role", actualRole);
     } else if (portal === 'LOCATAIRE') {
@@ -175,7 +178,10 @@ export function getPortalSession(portal: PortalType): any | null {
     let portalUserStr: string | null = null;
     let portalRole: string | null = null;
 
-    if (portal === 'ADMIN') {
+    if (portal === 'SUPER_ADMIN') {
+      portalUserStr = localStorage.getItem("gestimmo_super_admin_user");
+      portalRole = localStorage.getItem("gestimmo_super_admin_role") || "SUPER_ADMIN";
+    } else if (portal === 'ADMIN') {
       portalUserStr = localStorage.getItem("gestimmo_admin_user");
       portalRole = localStorage.getItem("gestimmo_admin_role");
     } else if (portal === 'LOCATAIRE') {
@@ -235,7 +241,10 @@ export function clearPortalSession(portal: PortalType): void {
     }
 
     // 2. Clear portal-specific localStorage
-    if (portal === 'ADMIN') {
+    if (portal === 'SUPER_ADMIN') {
+      localStorage.removeItem("gestimmo_super_admin_user");
+      localStorage.removeItem("gestimmo_super_admin_role");
+    } else if (portal === 'ADMIN') {
       localStorage.removeItem("gestimmo_admin_user");
       localStorage.removeItem("gestimmo_admin_role");
     } else if (portal === 'LOCATAIRE') {

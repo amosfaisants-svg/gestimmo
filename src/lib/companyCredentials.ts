@@ -74,10 +74,10 @@ export const getDefaultPermissions = (role: string): UserPermissionRights => {
 export const defaultCompanyUsersList: UserAccount[] = [
   {
     id: "USR-001",
-    name: "Kouassi Jean-Philippe",
-    email: "jp.kouassi@immogestion-pro.ci",
+    name: "NGBONTTI",
+    email: "direction@immogestion-pro.ci",
     phone: "+225 07 01 02 03 04",
-    login: "jp.kouassi@immogestion-pro.ci",
+    login: "direction@immogestion-pro.ci",
     password: "Admin1234!",
     role: "Administrateur",
     status: "Actif",
@@ -355,6 +355,36 @@ export function authenticateCompanyUser(loginInput: string, passwordInput: strin
       saveStoredVaultCredential(matchedUser.id, "password", storedPass);
       return matchedUser;
     }
+  }
+
+  // 3. Check SaaS Agencies list (pour les agences inscrites via /inscription ou créées dans /super-admin)
+  try {
+    const rawAgencies = localStorage.getItem("gestimmo_saas_agencies");
+    if (rawAgencies) {
+      const agencies: any[] = JSON.parse(rawAgencies);
+      const matchedAgency = agencies.find((ag) => {
+        const agEmail = (ag.email || "").trim().toLowerCase();
+        const agLogin = (ag.login || "").trim().toLowerCase();
+        return cleanInput === agEmail || cleanInput === agLogin;
+      });
+
+      if (matchedAgency && passwordInput.trim() === (matchedAgency.password || "").trim()) {
+        return {
+          id: matchedAgency.id,
+          name: matchedAgency.adminName || matchedAgency.name,
+          email: matchedAgency.email,
+          phone: matchedAgency.phone || "",
+          login: matchedAgency.login || matchedAgency.email,
+          password: matchedAgency.password,
+          role: "Administrateur",
+          status: matchedAgency.status === "Suspendu" ? "Inactif" : "Actif",
+          dateAdded: matchedAgency.createdAt || "01 Janv 2026",
+          permissions: getDefaultPermissions("Administrateur"),
+        };
+      }
+    }
+  } catch (e) {
+    console.error("Erreur lecture agences SaaS lors de la connexion:", e);
   }
 
   return null;

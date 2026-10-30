@@ -40,14 +40,16 @@ const allNavItems = [
   { name: "Paramètres", href: "/app/parametres", icon: Settings, moduleKey: "parametres" as const, adminOnly: true },
 ];
 
-import { clearPortalSession } from "@/lib/authSession";
+import { clearPortalSession, getPortalSession } from "@/lib/authSession";
 import { getStoredCompanyInfo } from "@/lib/companyInfo";
+import { ShieldCheck } from "lucide-react";
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const { currentUser, can, isGerant } = usePermissions();
+  const [isSuperAdminSession, setIsSuperAdminSession] = useState(false);
 
   const handleLogout = () => {
     clearPortalSession("ADMIN");
@@ -55,7 +57,7 @@ export function Sidebar() {
   };
 
   const userRole = currentUser?.role || (isGerant ? "Gérant" : "Administrateur");
-  const userName = currentUser?.name || (isGerant ? "Sarah Kone" : "Kouassi Jean-Philippe");
+  const userName = currentUser?.name || (isGerant ? "Sarah Kone" : "NGBONTTI");
   const userInitials = userName.split(" ").map((n: string) => n[0]).slice(0, 2).join("").toUpperCase() || "AD";
 
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
@@ -80,6 +82,7 @@ export function Sidebar() {
       try {
         const info = getStoredCompanyInfo();
         setCompanyInfo(info);
+        setIsSuperAdminSession(Boolean(getPortalSession("SUPER_ADMIN")));
       } catch (e) {}
     };
 
@@ -178,6 +181,14 @@ export function Sidebar() {
 
         {/* User profile & logout footer */}
         <div className="p-4 border-t border-app-border mt-auto space-y-2">
+          {isSuperAdminSession && (
+            <Link
+              href="/super-admin"
+              className="w-full flex items-center justify-center px-3 py-2 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-800 rounded-xl transition-colors shadow-sm"
+            >
+              <ShieldCheck className="w-4 h-4 mr-1.5 text-primary" /> Console Super-Admin SaaS
+            </Link>
+          )}
           <div className="bg-gray-50 p-3 rounded-xl border border-app-border flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center text-xs shrink-0">
               {userInitials}

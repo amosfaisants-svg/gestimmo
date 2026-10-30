@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Building, User, Mail, Phone, Lock } from "lucide-react";
 import { createProfile } from "@/lib/dataService";
+import { registerNewSaaSAgency } from "@/lib/superAdminService";
+import { setPortalSession } from "@/lib/authSession";
+import { getDefaultPermissions } from "@/lib/companyCredentials";
 
 export default function InscriptionPage() {
   const router = useRouter();
@@ -22,13 +25,40 @@ export default function InscriptionPage() {
     setLoading(true);
     try {
       const fullName = `${firstname.trim()} ${lastname.trim()}`.trim().toUpperCase();
-      if (fullName && email) {
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanPhone = phone.replace(/\D/g, "");
+
+      if (fullName && cleanEmail) {
+        const createdAgency = await registerNewSaaSAgency({
+          companyName: company.trim() || `Agence ${fullName}`,
+          adminName: fullName,
+          email: cleanEmail,
+          phone: cleanPhone,
+          password: password || "Admin1234!",
+          plan: "Essai Gratuit",
+          status: "En essai",
+        });
+
         await createProfile({
           full_name: fullName,
-          email: email.trim().toLowerCase(),
-          phone: phone.replace(/\D/g, ''),
-          role: 'ADMINISTRATEUR',
-          permissions: { all: true }
+          email: cleanEmail,
+          phone: cleanPhone,
+          role: "ADMINISTRATEUR",
+          permissions: { all: true },
+        });
+
+        setPortalSession("ADMIN", {
+          id: createdAgency.id,
+          companyId: createdAgency.id,
+          companyName: createdAgency.name,
+          name: fullName,
+          email: cleanEmail,
+          phone: cleanPhone,
+          login: cleanEmail,
+          role: "Administrateur",
+          userRole: "ADMIN",
+          status: "Actif",
+          permissions: getDefaultPermissions("Administrateur"),
         });
       }
     } catch (err) {
