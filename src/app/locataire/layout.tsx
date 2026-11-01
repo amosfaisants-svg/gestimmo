@@ -44,10 +44,8 @@ export default function LocataireLayout({
 
   return (
     <div className="flex min-h-screen bg-app-bg text-gray-900 font-sans">
-      <div className="hidden md:block">
-        <SidebarLocataire />
-      </div>
-      <main className="flex-1 h-screen overflow-y-auto">
+      <SidebarLocataire />
+      <main className="flex-1 h-screen overflow-y-auto pt-14 md:pt-0">
         <div className="p-4 md:p-8 max-w-6xl mx-auto">
           {children}
         </div>

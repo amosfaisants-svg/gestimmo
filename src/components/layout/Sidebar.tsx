@@ -118,32 +118,56 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Mobile Toggle */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="md:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-md shadow-sm border border-app-border print:hidden"
-      >
-        {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-      </button>
+      {/* Barre supérieure mobile */}
+      <div className="md:hidden fixed top-0 inset-x-0 z-40 h-14 bg-white border-b border-app-border px-4 flex items-center justify-between shadow-xs print:hidden">
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className="p-2 -ml-1 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer flex items-center gap-2"
+          aria-label="Ouvrir le menu"
+        >
+          {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          <span className="text-xs font-semibold text-gray-700">Menu</span>
+        </button>
+
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-base font-bold text-primary tracking-tight truncate max-w-[160px]">
+            {companyInfo?.name || "GESTIMMO"}
+          </span>
+        </div>
+
+        <div className="w-8 h-8 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center text-xs shrink-0">
+          {userInitials}
+        </div>
+      </div>
 
       {/* Sidebar */}
       <div
         className={cn(
-          "fixed inset-y-0 left-0 z-40 w-64 bg-white border-r border-app-border transform transition-transform duration-200 ease-in-out md:translate-x-0 md:static md:flex md:flex-col print:hidden",
-          isOpen ? "translate-x-0" : "-translate-x-full"
+          "fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-app-border flex flex-col transform transition-transform duration-200 ease-in-out md:translate-x-0 md:static print:hidden",
+          isOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
         )}
       >
-        <div className="p-6 flex items-center space-x-3">
-          {companyInfo?.logo ? (
-            <img src={companyInfo.logo} alt="Logo" className="w-8 h-8 rounded-lg object-contain bg-white border border-gray-100" />
-          ) : (
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0">
-              <Home className="text-white h-5 w-5" />
-            </div>
-          )}
-          <span className="text-xl font-bold text-gray-900 truncate" title={companyInfo?.name || "GESTIMMO"}>
-            {companyInfo?.name || "GESTIMMO"}
-          </span>
+        <div className="p-6 flex items-center justify-between">
+          <div className="flex items-center space-x-3 min-w-0">
+            {companyInfo?.logo ? (
+              <img src={companyInfo.logo} alt="Logo" className="w-8 h-8 rounded-lg object-contain bg-white border border-gray-100 shrink-0" />
+            ) : (
+              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0">
+                <Home className="text-white h-5 w-5" />
+              </div>
+            )}
+            <span className="text-xl font-bold text-gray-900 truncate" title={companyInfo?.name || "GESTIMMO"}>
+              {companyInfo?.name || "GESTIMMO"}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsOpen(false)}
+            className="md:hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         {/* Use overflow-y-auto and styled scrollbar for a long menu */}
@@ -154,6 +178,7 @@ export function Sidebar() {
               <Link
                 key={item.name}
                 href={item.href}
+                onClick={() => setIsOpen(false)}
                 className={cn(
                   "flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                   isActive
