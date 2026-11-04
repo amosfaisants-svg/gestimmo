@@ -251,7 +251,7 @@ export function authenticateProprietaire(loginInput: string, passwordInput: stri
     const finalLogin = matched.login || defaultCred?.login || matched.email || matched.name;
     const finalPass = matched.password || defaultCred?.password || "Prop1234!";
 
-    return {
+    const resultCred: OwnerCredential = {
       id: matched.id || "O-100",
       name: matched.name,
       code: matched.code || defaultCred?.code,
@@ -264,7 +264,144 @@ export function authenticateProprietaire(loginInput: string, passwordInput: stri
       accountStatus: matched.accountStatus || "Actif",
       createdAt: matched.createdAt || defaultCred?.createdAt || new Date().toISOString()
     };
+
+    recordOwnerLoginEvent(
+      resultCred,
+      resultCred.accountStatus === "Inactif" ? "Échec (Compte inactif)" : "Succès"
+    );
+
+    return resultCred;
   }
 
   return null;
+}
+
+export interface OwnerLoginLogEntry {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  ownerCode?: string;
+  loginUsed: string;
+  timestamp: string;
+  formattedDate: string;
+  device: string;
+  browser: string;
+  status: "Succès" | "Échec (Compte inactif)" | "Déconnexion";
+}
+
+const OWNER_LOGIN_LOGS_KEY = "gestimmo_owner_login_logs";
+
+function detectDeviceAndBrowser(): { device: string; browser: string } {
+  if (typeof window === "undefined" || !navigator?.userAgent) {
+    return { device: "Ordinateur", browser: "Navigateur Web" };
+  }
+  const ua = navigator.userAgent;
+
+  let device = "Ordinateur";
+  if (/android/i.test(ua)) device = "Smartphone Android";
+  else if (/iphone|ipod/i.test(ua)) device = "iPhone (iOS)";
+  else if (/ipad/i.test(ua)) device = "Tablette iPad";
+  else if (/windows/i.test(ua)) device = "Ordinateur Windows";
+  else if (/macintosh|mac os x/i.test(ua)) device = "Ordinateur Mac";
+  else if (/linux/i.test(ua)) device = "Ordinateur Linux";
+
+  let browser = "Navigateur";
+  if (/edg\//i.test(ua)) browser = "Microsoft Edge";
+  else if (/opr\//i.test(ua) || /opera/i.test(ua)) browser = "Opera";
+  else if (/chrome|crios/i.test(ua)) browser = "Google Chrome";
+  else if (/firefox|fxios/i.test(ua)) browser = "Mozilla Firefox";
+  else if (/safari/i.test(ua)) browser = "Safari";
+
+  return { device, browser };
+}
+
+export function recordOwnerLoginEvent(
+  owner: { id?: string; name?: string; full_name?: string; code?: string; login?: string; email?: string },
+  status: "Succès" | "Échec (Compte inactif)" | "Déconnexion" = "Succès"
+): void {
+  if (typeof window === "undefined" || !owner) return;
+
+  try {
+    const raw = localStorage.getItem(OWNER_LOGIN_LOGS_KEY);
+    const logs: OwnerLoginLogEntry[] = raw ? JSON.parse(raw) : [];
+    const now = new Date();
+    const { device, browser } = detectDeviceAndBrowser();
+
+    const ownerName = (owner.name || owner.full_name || "Propriétaire").trim();
+    const entry: OwnerLoginLogEntry = {
+      id: `LOG-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
+      ownerId: String(owner.id || ""),
+      ownerName,
+      ownerCode: owner.code || "",
+      loginUsed: owner.login || owner.email || ownerName,
+      timestamp: now.toISOString(),
+      formattedDate: now.toLocaleDateString("fr-FR", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      device,
+      browser,
+      status,
+    };
+
+    const updated = [entry, ...logs].slice(0, 300);
+    localStorage.setItem(OWNER_LOGIN_LOGS_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new Event("gestimmo_owner_logs_updated"));
+  } catch (e) {
+    console.error("Erreur enregistrement journal connexion propriétaire:", e);
+  }
+}
+
+export function getOwnerLoginLogs(owner: { id?: string; name?: string; code?: string }): OwnerLoginLogEntry[] {
+  if (typeof window === "undefined" || !owner) return [];
+  try {
+    const raw = localStorage.getItem(OWNER_LOGIN_LOGS_KEY);
+    const logs: OwnerLoginLogEntry[] = raw ? JSON.parse(raw) : [];
+    const targetId = String(owner.id || "").trim().toLowerCase();
+    const targetName = String(owner.name || "").trim().toLowerCase();
+    const targetCode = String(owner.code || "").trim().toLowerCase();
+
+    return logs.filter((log) => {
+      const lId = (log.ownerId || "").trim().toLowerCase();
+      const lName = (log.ownerName || "").trim().toLowerCase();
+      const lCode = (log.ownerCode || "").trim().toLowerCase();
+
+      return (
+        (targetId && lId && lId === targetId) ||
+        (targetName && lName && lName === targetName) ||
+        (targetCode && lCode && lCode === targetCode)
+      );
+    });
+  } catch (e) {
+    return [];
+  }
+}
+
+export function clearOwnerLoginLogs(owner: { id?: string; name?: string; code?: string }): void {
+  if (typeof window === "undefined" || !owner) return;
+  try {
+    const raw = localStorage.getItem(OWNER_LOGIN_LOGS_KEY);
+    if (!raw) return;
+    const logs: OwnerLoginLogEntry[] = JSON.parse(raw);
+    const targetId = String(owner.id || "").trim().toLowerCase();
+    const targetName = String(owner.name || "").trim().toLowerCase();
+    const targetCode = String(owner.code || "").trim().toLowerCase();
+
+    const remaining = logs.filter((log) => {
+      const lId = (log.ownerId || "").trim().toLowerCase();
+      const lName = (log.ownerName || "").trim().toLowerCase();
+      const lCode = (log.ownerCode || "").trim().toLowerCase();
+      const isMatch =
+        (targetId && lId && lId === targetId) ||
+        (targetName && lName && lName === targetName) ||
+        (targetCode && lCode && lCode === targetCode);
+      return !isMatch;
+    });
+
+    localStorage.setItem(OWNER_LOGIN_LOGS_KEY, JSON.stringify(remaining));
+    window.dispatchEvent(new Event("gestimmo_owner_logs_updated"));
+  } catch (e) {}
 }

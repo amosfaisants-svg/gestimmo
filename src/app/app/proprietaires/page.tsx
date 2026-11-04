@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/Badge";
-import { Search, UserPlus, Phone, Mail, Building2, Trash2, Key, Copy, Check, ShieldCheck, CheckCircle2, Power, CheckSquare, X } from "lucide-react";
+import { Search, UserPlus, Phone, Mail, Building2, Trash2, Key, Copy, Check, ShieldCheck, CheckCircle2, Power, CheckSquare, X, History, Monitor, Smartphone, Clock } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ensureOwnerCredentials, OwnerCredential } from "@/lib/ownerCredentials";
+import { ensureOwnerCredentials, OwnerCredential, getOwnerLoginLogs, clearOwnerLoginLogs, OwnerLoginLogEntry } from "@/lib/ownerCredentials";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
 import { fetchOwners, deleteOwner, loadAllDataFromDatabase } from "@/lib/dataService";
@@ -37,6 +37,10 @@ export default function ProprietairesPage() {
   const [isCredModalOpen, setIsCredModalOpen] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
+  // Journal de connexion states
+  const [logModalOwner, setLogModalOwner] = useState<any | null>(null);
+  const [ownerLogs, setOwnerLogs] = useState<OwnerLoginLogEntry[]>([]);
+
   // Bulk deletion states
   const [selectedOwnerIds, setSelectedOwnerIds] = useState<string[]>([]);
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
@@ -45,6 +49,17 @@ export default function ProprietairesPage() {
     const creds = ensureOwnerCredentials(owner.name, owner.type, owner.email, owner.phone, owner.code);
     setSelectedCredential(creds);
     setIsCredModalOpen(true);
+  };
+
+  const handleShowLoginLogs = (owner: any) => {
+    setLogModalOwner(owner);
+    setOwnerLogs(getOwnerLoginLogs(owner));
+  };
+
+  const handleClearOwnerLogs = () => {
+    if (!logModalOwner) return;
+    clearOwnerLoginLogs(logModalOwner);
+    setOwnerLogs([]);
   };
 
   const handleDelete = async (id: string) => {
@@ -319,6 +334,14 @@ export default function ProprietairesPage() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
                     <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleShowLoginLogs(owner)}
+                        className="text-xs font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-colors px-3 py-1.5 rounded-lg flex items-center gap-1 border border-indigo-200 hover:border-indigo-600 shadow-sm"
+                        title="Afficher le journal de connexion de ce propriétaire"
+                      >
+                        <History className="h-3.5 w-3.5" />
+                        Journal
+                      </button>
                       {can("biens", "edit") && (
                         <button
                           onClick={() => handleToggleOwnerAccountStatus(owner)}
@@ -373,6 +396,153 @@ export default function ProprietairesPage() {
           </table>
         </div>
       </div>
+
+      {/* Modale du Journal de Connexion Propriétaire */}
+      {logModalOwner && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full border border-app-border overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="p-6 border-b border-app-border flex items-center justify-between bg-gray-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Journal de connexion</h3>
+                  <p className="text-xs text-gray-500">
+                    Propriétaire : <span className="font-semibold text-gray-900">{logModalOwner.name}</span> ({logModalOwner.code})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setLogModalOwner(null)}
+                className="p-2 hover:bg-gray-200 rounded-full text-gray-500 transition-colors"
+                title="Fermer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Summary KPIs */}
+            <div className="px-6 py-3.5 bg-white border-b border-app-border flex flex-wrap items-center justify-between gap-4 text-xs">
+              <div className="flex items-center gap-4">
+                <div>
+                  <span className="text-gray-500">Statut du compte : </span>
+                  <Badge variant={logModalOwner.accountStatus === "Inactif" ? "danger" : "success"} dot>
+                    {logModalOwner.accountStatus || "Actif"}
+                  </Badge>
+                </div>
+                <div>
+                  <span className="text-gray-500">Total d&apos;événements : </span>
+                  <span className="font-bold text-gray-900">{ownerLogs.length}</span>
+                </div>
+              </div>
+              {ownerLogs.length > 0 && (
+                <div className="text-gray-500 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Dernière activité : <strong className="text-gray-900">{ownerLogs[0].formattedDate}</strong></span>
+                </div>
+              )}
+            </div>
+
+            {/* Body */}
+            <div className="p-6 overflow-y-auto flex-1">
+              {ownerLogs.length === 0 ? (
+                <div className="text-center py-12 space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center mx-auto">
+                    <History className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Aucune connexion enregistrée</p>
+                    <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+                      Ce propriétaire ne s&apos;est pas encore connecté à son Espace Propriétaire ou son historique a été effacé.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-x-auto border border-app-border rounded-xl">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-primary-50/30 text-xs text-gray-500 uppercase tracking-wider border-b border-app-border">
+                        <th className="px-4 py-3 font-medium">Date & Heure</th>
+                        <th className="px-4 py-3 font-medium">Appareil & Navigateur</th>
+                        <th className="px-4 py-3 font-medium">Identifiant utilisé</th>
+                        <th className="px-4 py-3 font-medium text-center">Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-app-border text-sm">
+                      {ownerLogs.map((log) => {
+                        const isMobile = log.device.toLowerCase().includes("mobile") || log.device.toLowerCase().includes("android") || log.device.toLowerCase().includes("iphone");
+                        return (
+                          <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
+                            <td className="px-4 py-3 whitespace-nowrap text-xs font-medium text-gray-900">
+                              <div className="flex items-center gap-1.5">
+                                <Clock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                {log.formattedDate}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600">
+                              <div className="flex items-center gap-1.5">
+                                {isMobile ? (
+                                  <Smartphone className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                ) : (
+                                  <Monitor className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                                )}
+                                <span>{log.device} • <strong className="font-medium text-gray-800">{log.browser}</strong></span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className="text-xs font-mono bg-gray-100 text-gray-700 px-2 py-0.5 rounded border border-gray-200">
+                                {log.loginUsed}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-center">
+                              <Badge
+                                variant={
+                                  log.status === "Succès"
+                                    ? "success"
+                                    : log.status === "Déconnexion"
+                                    ? "default"
+                                    : "danger"
+                                }
+                                dot
+                              >
+                                {log.status}
+                              </Badge>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 px-6 border-t border-app-border bg-gray-50/50 flex items-center justify-between gap-3">
+              {ownerLogs.length > 0 ? (
+                <button
+                  onClick={handleClearOwnerLogs}
+                  className="text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Effacer l&apos;historique
+                </button>
+              ) : (
+                <div />
+              )}
+              <button
+                onClick={() => setLogModalOwner(null)}
+                className="bg-primary text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modale de confirmation de suppression */}
       {confirmDeleteId && (() => {
         const owner = owners.find((o) => o.id === confirmDeleteId);

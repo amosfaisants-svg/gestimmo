@@ -75,7 +75,7 @@ export function Sidebar() {
         } else {
           setUnreadNotifCount(2); // default unread count
         }
-      } catch (e) {}
+      } catch (e) { }
     };
 
     const updateCompany = () => {
@@ -83,7 +83,7 @@ export function Sidebar() {
         const info = getStoredCompanyInfo();
         setCompanyInfo(info);
         setIsSuperAdminSession(Boolean(getPortalSession("SUPER_ADMIN")));
-      } catch (e) {}
+      } catch (e) { }
     };
 
     updateCount();

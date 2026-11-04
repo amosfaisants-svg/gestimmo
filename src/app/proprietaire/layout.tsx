@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import SidebarProprietaire from "@/components/layout/SidebarProprietaire";
 import { getPortalSession } from "@/lib/authSession";
+import { recordOwnerLoginEvent } from "@/lib/ownerCredentials";
 
 export default function ProprietaireLayout({
   children,
@@ -29,6 +30,14 @@ export default function ProprietaireLayout({
     }
 
     setIsAuthorized(true);
+
+    // Enregistrer la session active dans le journal de connexion (1 fois par onglet/session)
+    if (typeof window !== "undefined") {
+      const sessionLogKey = `gestimmo_owner_session_logged_${session.user.code || session.user.name || "active"}`;
+      if (!sessionStorage.getItem(sessionLogKey)) {
+        sessionStorage.setItem(sessionLogKey, "1");
+      }
+    }
   }, [router]);
 
   if (!isAuthorized) {

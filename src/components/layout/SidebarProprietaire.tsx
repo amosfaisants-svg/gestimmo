@@ -7,6 +7,7 @@ import { Home, Building2, FileText, LogOut, MessageSquare, Clock, Menu, X } from
 import { cn } from "@/lib/utils";
 
 import { getPortalSession, clearPortalSession } from "@/lib/authSession";
+import { recordOwnerLoginEvent } from "@/lib/ownerCredentials";
 import { getUnreadCountForUser } from "@/lib/messagesService";
 import { isPendingRentsVisibleForOwner } from "@/lib/portalSettings";
 
@@ -174,6 +175,9 @@ export default function SidebarProprietaire() {
   const ownerType = currentOwner?.type === "entreprise" ? "Entreprise" : "Particulier";
 
   const handleLogout = () => {
+    if (currentOwner) {
+      recordOwnerLoginEvent(currentOwner, "Déconnexion");
+    }
     clearPortalSession("PROPRIETAIRE");
     window.location.href = "/connexion";
   };
