@@ -5,10 +5,10 @@ import { Badge } from "@/components/ui/Badge";
 import { Search, UserPlus, Phone, Mail, Building2, Trash2, Key, Copy, Check, ShieldCheck, CheckCircle2, Power, CheckSquare, X, History, Monitor, Smartphone, Clock } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ensureOwnerCredentials, OwnerCredential, getOwnerLoginLogs, clearOwnerLoginLogs, OwnerLoginLogEntry } from "@/lib/ownerCredentials";
+import { ensureOwnerCredentials, OwnerCredential, getOwnerLoginLogs, fetchOwnerLoginLogsAsync, clearOwnerLoginLogs, OwnerLoginLogEntry } from "@/lib/ownerCredentials";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
-import { fetchOwners, deleteOwner, loadAllDataFromDatabase } from "@/lib/dataService";
+import { fetchOwners, deleteOwner, updateOwner, loadAllDataFromDatabase } from "@/lib/dataService";
 
 const formatFCFA = (amount: number | string) => {
   if (typeof amount === "string") return amount;
@@ -46,14 +46,16 @@ export default function ProprietairesPage() {
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
 
   const handleShowCredentials = (owner: any) => {
-    const creds = ensureOwnerCredentials(owner.name, owner.type, owner.email, owner.phone, owner.code);
+    const creds = ensureOwnerCredentials(owner.name, owner.type, owner.email, owner.phone, owner.code, owner.id);
     setSelectedCredential(creds);
     setIsCredModalOpen(true);
   };
 
-  const handleShowLoginLogs = (owner: any) => {
+  const handleShowLoginLogs = async (owner: any) => {
     setLogModalOwner(owner);
     setOwnerLogs(getOwnerLoginLogs(owner));
+    const mergedLogs = await fetchOwnerLoginLogsAsync(owner);
+    setOwnerLogs(mergedLogs);
   };
 
   const handleClearOwnerLogs = () => {
@@ -99,7 +101,7 @@ export default function ProprietairesPage() {
     setIsBulkDeleteModalOpen(false);
   };
 
-  const handleToggleOwnerAccountStatus = (owner: any) => {
+  const handleToggleOwnerAccountStatus = async (owner: any) => {
     const currentStatus = owner.accountStatus || "Actif";
     const nextStatus = currentStatus === "Inactif" ? "Actif" : "Inactif";
     const updatedOwners = owners.map((o) =>
@@ -109,6 +111,9 @@ export default function ProprietairesPage() {
     );
     setOwners(updatedOwners);
     localStorage.setItem("gestimmo_proprietaires", JSON.stringify(updatedOwners));
+    if (owner.id) {
+      await updateOwner(owner.id, { account_status: nextStatus });
+    }
   };
 
   useEffect(() => {

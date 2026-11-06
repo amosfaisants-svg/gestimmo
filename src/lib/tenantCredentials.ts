@@ -1,7 +1,9 @@
 import { getStoredVaultCredential, saveStoredVaultCredential } from "./authSession";
+import { supabase } from "./supabase";
 
 export interface TenantCredential {
   id: string;
+  companyId?: string;
   name: string;
   email?: string;
   phone?: string;
@@ -117,10 +119,38 @@ export const defaultTenantCredentials: Record<string, TenantCredential> = {
   }
 };
 
+export function computeTenantCandidatePasswords(tenantName?: string, tenantId?: string): string[] {
+  const candidates = new Set<string>();
+  const cleanName = (tenantName || "").trim();
+
+  if (cleanName) {
+    const upper = cleanName.toUpperCase();
+    let hashUpper = 1234;
+    for (let i = 0; i < upper.length; i++) {
+      hashUpper = (hashUpper * 31 + upper.charCodeAt(i)) % 9000;
+    }
+    candidates.add(`Loca${1000 + Math.abs(hashUpper)}!`);
+
+    let hashRaw = 1234;
+    for (let i = 0; i < cleanName.length; i++) {
+      hashRaw = (hashRaw * 31 + cleanName.charCodeAt(i)) % 9000;
+    }
+    candidates.add(`Loca${1000 + Math.abs(hashRaw)}!`);
+  }
+
+  if (tenantId && String(tenantId).trim().length >= 4) {
+    const idPrefix = String(tenantId).trim().slice(0, 4);
+    candidates.add(`Locat${idPrefix}!`);
+    candidates.add(`Loca${idPrefix}!`);
+  }
+
+  return Array.from(candidates);
+}
+
 /**
  * Generate clean login and stable password for a tenant
  */
-export function generateTenantCredentials(tenantName: string, existingEmail?: string, existingPhone?: string) {
+export function generateTenantCredentials(tenantName: string, existingEmail?: string, existingPhone?: string, tenantId?: string) {
   const nameTrimmed = tenantName.trim();
   const parts = nameTrimmed.toLowerCase().split(/\s+/);
   
@@ -130,14 +160,24 @@ export function generateTenantCredentials(tenantName: string, existingEmail?: st
   } else if (existingPhone && existingPhone.trim()) {
     login = existingPhone.replace(/\s+/g, '');
   } else {
-    // Generate clean username e.g. jean.dupont
     login = parts.join('.');
   }
 
   // Check vault first
   const inVault = getStoredVaultCredential('locataire', tenantName);
-  if (inVault && inVault.password) {
+  if (inVault && inVault.password && !inVault.password.includes("••••")) {
     return { login: inVault.login || login, password: inVault.password };
+  }
+  if (tenantId) {
+    const vaultByIdPass = getStoredVaultCredential(tenantId, "password");
+    const vaultByIdLogin = getStoredVaultCredential(tenantId, "login");
+    if (vaultByIdPass && !String(vaultByIdPass).includes("••••")) {
+      return { login: vaultByIdLogin || login, password: String(vaultByIdPass) };
+    }
+  }
+
+  if (tenantId && /^[0-9a-f]{8}-/i.test(tenantId.trim())) {
+    return { login, password: `Locat${tenantId.trim().slice(0, 4)}!` };
   }
 
   // Stable deterministic password based on name hash (never changes randomly)
@@ -172,12 +212,11 @@ export function ensureTenantCredentials(tenantName: string, unit?: string, prope
 
   // Load locataires from localStorage
   const storedTenantsRaw = localStorage.getItem("gestimmo_locataires");
-  let tenants: any[] = storedTenantsRaw ? JSON.parse(storedTenantsRaw) : [];
+  const tenants: any[] = storedTenantsRaw ? JSON.parse(storedTenantsRaw) : [];
 
   let targetTenant = tenants.find((t: any) => t.name && t.name.trim().toUpperCase() === normName);
 
   if (targetTenant && targetTenant.login && targetTenant.password && !targetTenant.password.includes("••••")) {
-    // Save to vault for absolute persistence
     saveStoredVaultCredential('locataire', tenantName, {
       login: targetTenant.login,
       password: targetTenant.password,
@@ -192,6 +231,7 @@ export function ensureTenantCredentials(tenantName: string, unit?: string, prope
     }
     return {
       id: targetTenant.id || "T-LOC",
+      companyId: targetTenant.companyId || targetTenant.company_id,
       name: targetTenant.name || tenantName,
       email: targetTenant.email,
       phone: targetTenant.phone,
@@ -209,7 +249,7 @@ export function ensureTenantCredentials(tenantName: string, unit?: string, prope
   // Generate stable credentials
   const email = targetTenant?.email || vaultCred?.login || defaultCred?.email || "";
   const phone = targetTenant?.phone || defaultCred?.phone || "";
-  const generated = generateTenantCredentials(tenantName, email, phone);
+  const generated = generateTenantCredentials(tenantName, email, phone, targetTenant?.id);
 
   const finalLogin = targetTenant?.login || vaultCred?.login || defaultCred?.login || generated.login;
   const finalPassword = (targetTenant?.password && !targetTenant.password.includes("••••") ? targetTenant.password : null) || vaultCred?.password || defaultCred?.password || generated.password;
@@ -228,7 +268,6 @@ export function ensureTenantCredentials(tenantName: string, unit?: string, prope
     if (property) targetTenant.property = property;
     if (rent !== undefined) targetTenant.rent = rent;
   } else {
-    // Create new tenant entry
     targetTenant = {
       id: defaultCred?.id || `T-${Math.floor(1000 + Math.random() * 9000)}`,
       name: tenantName.trim(),
@@ -251,6 +290,7 @@ export function ensureTenantCredentials(tenantName: string, unit?: string, prope
 
   return {
     id: targetTenant.id,
+    companyId: targetTenant.companyId || targetTenant.company_id,
     name: targetTenant.name,
     email: targetTenant.email,
     phone: targetTenant.phone,
@@ -265,63 +305,95 @@ export function ensureTenantCredentials(tenantName: string, unit?: string, prope
   };
 }
 
+function matchesTenantRecord(t: any, loginInput: string, passwordInput: string): boolean {
+  const cleanInput = loginInput.trim().toLowerCase();
+  const digitsOnly = loginInput.replace(/\D/g, "");
+
+  const rawName = (t.name || t.full_name || "").trim();
+  const tName = rawName.toLowerCase();
+  const tLogin = (t.login || "").trim().toLowerCase();
+  const tEmail = (t.email || "").trim().toLowerCase();
+  const tPhoneDigits = String(t.phone || "").replace(/\D/g, "");
+  const tId = String(t.id || "").trim().toLowerCase();
+
+  const generatedLocataireLogin = `locataire.${tName.replace(/[^a-z0-9]/g, "")}`;
+  const generatedDotLogin = tName.split(/\s+/).filter(Boolean).join(".");
+  const generatedEmailLogin = `${generatedDotLogin}@email.com`;
+
+  const matchesLogin =
+    (tLogin && cleanInput === tLogin) ||
+    (tEmail && cleanInput === tEmail) ||
+    (tName && cleanInput === tName) ||
+    (tId && cleanInput === tId) ||
+    cleanInput === generatedLocataireLogin ||
+    cleanInput === generatedDotLogin ||
+    cleanInput === generatedEmailLogin ||
+    (cleanInput.length > 3 && tName.includes(cleanInput)) ||
+    (digitsOnly.length >= 6 && tPhoneDigits.length >= 6 && (tPhoneDigits.includes(digitsOnly) || digitsOnly.includes(tPhoneDigits)));
+
+  if (!matchesLogin) return false;
+
+  const inputPass = passwordInput.trim();
+  if (!inputPass) return false;
+
+  const vaultCred = getStoredVaultCredential('locataire', rawName || t.id);
+  const vaultById = t.id ? getStoredVaultCredential(String(t.id), "password") : null;
+  const defaultCred = defaultTenantCredentials[rawName.toUpperCase()];
+
+  const validPasswords = new Set<string>([
+    ...computeTenantCandidatePasswords(rawName, t.id),
+    "Loca1234!",
+    "locataire",
+    "123456",
+    "1234",
+    "gestimmo",
+  ]);
+
+  if (vaultCred?.password && !String(vaultCred.password).includes("••••")) {
+    validPasswords.add(String(vaultCred.password).trim());
+  }
+  if (vaultById && !String(vaultById).includes("••••")) {
+    validPasswords.add(String(vaultById).trim());
+  }
+  if (t.password && !String(t.password).includes("••••")) {
+    validPasswords.add(String(t.password).trim());
+  }
+  if (defaultCred?.password) {
+    validPasswords.add(defaultCred.password.trim());
+  }
+
+  for (const candidate of Array.from(validPasswords)) {
+    if (inputPass === candidate || inputPass.toLowerCase() === candidate.toLowerCase()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Authenticates a tenant using login (or email/phone/name) and password
  */
 export function authenticateLocataire(loginInput: string, passwordInput: string): TenantCredential | null {
   if (typeof window === "undefined") return null;
 
-  const cleanInput = loginInput.trim().toLowerCase();
-  const digitsOnly = loginInput.replace(/\D/g, "");
-
   const storedTenantsRaw = localStorage.getItem("gestimmo_locataires");
-  let tenants: any[] = storedTenantsRaw ? JSON.parse(storedTenantsRaw) : [];
+  const tenants: any[] = storedTenantsRaw ? JSON.parse(storedTenantsRaw) : [];
 
-  // Combine with defaultTenantCredentials
   Object.values(defaultTenantCredentials).forEach((defCred) => {
     if (!tenants.some((t: any) => t.name && t.name.trim().toUpperCase() === defCred.name.toUpperCase())) {
       tenants.push({ ...defCred, registeredAt: defCred.createdAt, status: "À JOUR", role: "Locataire" });
     }
   });
 
-  const matched = tenants.find((t: any) => {
-    const tName = (t.name || "").toLowerCase();
-    const tLogin = (t.login || "").toLowerCase();
-    const tEmail = (t.email || "").toLowerCase();
-    const tPhoneDigits = (t.phone || "").replace(/\D/g, "");
-    const tId = (t.id || "").toLowerCase();
-
-    const matchesLogin =
-      cleanInput === tLogin ||
-      cleanInput === tEmail ||
-      cleanInput === tName ||
-      cleanInput === tId ||
-      (cleanInput.length > 2 && tName.includes(cleanInput)) ||
-      (digitsOnly.length >= 4 && tPhoneDigits.length >= 4 && (tPhoneDigits.includes(digitsOnly) || digitsOnly.includes(tPhoneDigits)));
-
-    if (!matchesLogin) return false;
-
-    // Password matching (with vault and fallback support)
-    const vaultCred = getStoredVaultCredential('locataire', t.name || t.id);
-    const storedPass = (vaultCred?.password || (t.password && !t.password.includes("••••") ? t.password : null) || defaultTenantCredentials[t.name?.toUpperCase()]?.password || "Loca1234!").trim();
-    const inputPass = passwordInput.trim();
-    const isPasswordValid =
-      inputPass === storedPass ||
-      inputPass.toLowerCase() === storedPass.toLowerCase() ||
-      inputPass === "Loca1234!" ||
-      inputPass.toLowerCase() === "locataire" ||
-      inputPass === "123456" ||
-      inputPass === "1234" ||
-      inputPass === "gestimmo";
-
-    return isPasswordValid;
-  });
+  const matched = tenants.find((t: any) => matchesTenantRecord(t, loginInput, passwordInput));
 
   if (matched) {
     const defaultCred = defaultTenantCredentials[matched.name?.toUpperCase()];
     return {
       id: matched.id || "T-LOC",
-      name: matched.name,
+      companyId: matched.companyId || matched.company_id,
+      name: matched.name || matched.full_name,
       email: matched.email || defaultCred?.email,
       phone: matched.phone || defaultCred?.phone,
       login: matched.login || defaultCred?.login || matched.email || matched.name,
@@ -336,4 +408,84 @@ export function authenticateLocataire(loginInput: string, passwordInput: string)
   }
 
   return null;
+}
+
+/**
+ * Authentifie un locataire depuis N'IMPORTE QUEL ordinateur ou téléphone via Supabase + localStorage
+ */
+export async function authenticateLocataireAsync(
+  loginInput: string,
+  passwordInput: string
+): Promise<TenantCredential | null> {
+  if (typeof window === "undefined") return null;
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (supabaseUrl && supabaseUrl.startsWith("http")) {
+    try {
+      const { data: dbTenants, error } = await supabase.from("tenants").select("*");
+      if (!error && Array.isArray(dbTenants) && dbTenants.length > 0) {
+        const storedTenantsRaw = localStorage.getItem("gestimmo_locataires");
+        const localTenants: any[] = storedTenantsRaw ? JSON.parse(storedTenantsRaw) : [];
+
+        const matchedDb: any = dbTenants.find((dbRow: any) => {
+          const localMatch = localTenants.find(
+            (lt: any) =>
+              lt.id === dbRow.id ||
+              (lt.name && dbRow.full_name && lt.name.trim().toLowerCase() === dbRow.full_name.trim().toLowerCase())
+          );
+          const merged = {
+            ...localMatch,
+            ...dbRow,
+            id: dbRow.id,
+            name: dbRow.full_name,
+            email: dbRow.email || localMatch?.email || "",
+            phone: dbRow.phone || localMatch?.phone || "",
+            login: localMatch?.login || (dbRow.email ? dbRow.email.toLowerCase() : ""),
+            password: localMatch?.password,
+          };
+          return matchesTenantRecord(merged, loginInput, passwordInput);
+        });
+
+        if (matchedDb) {
+          const localMatch = localTenants.find(
+            (lt: any) =>
+              lt.id === matchedDb.id ||
+              (lt.name && matchedDb.full_name && lt.name.trim().toLowerCase() === matchedDb.full_name.trim().toLowerCase())
+          );
+          const generated = generateTenantCredentials(
+            matchedDb.full_name,
+            matchedDb.email || undefined,
+            matchedDb.phone || undefined,
+            matchedDb.id
+          );
+
+          const resultCred: TenantCredential = {
+            id: matchedDb.id,
+            companyId: matchedDb.company_id || "11111111-1111-1111-1111-111111111111",
+            name: matchedDb.full_name,
+            email: matchedDb.email || localMatch?.email || "",
+            phone: matchedDb.phone || localMatch?.phone || "",
+            login: localMatch?.login || generated.login,
+            password: localMatch?.password || generated.password,
+            unit: localMatch?.unit || "-",
+            property: localMatch?.property || "-",
+            rent: localMatch?.rent || 0,
+            role: "Locataire",
+            accountStatus: localMatch?.accountStatus === "Inactif" ? "Inactif" : "Actif",
+            createdAt: matchedDb.created_at || new Date().toISOString(),
+          };
+
+          if (resultCred.companyId) {
+            localStorage.setItem("gestimmo_active_company_id", resultCred.companyId);
+          }
+
+          return resultCred;
+        }
+      }
+    } catch (e) {
+      console.error("Erreur vérification Supabase locataire:", e);
+    }
+  }
+
+  return authenticateLocataire(loginInput, passwordInput);
 }

@@ -4,12 +4,12 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Lock, Mail, AlertCircle } from "lucide-react";
-import { authenticateLocataire } from "@/lib/tenantCredentials";
-import { authenticateProprietaire } from "@/lib/ownerCredentials";
-import { authenticateCompanyUser } from "@/lib/companyCredentials";
+import { authenticateLocataireAsync } from "@/lib/tenantCredentials";
+import { authenticateProprietaireAsync } from "@/lib/ownerCredentials";
+import { authenticateCompanyUserAsync } from "@/lib/companyCredentials";
 import { authenticateSuperAdmin, isAgencySuspendedForUser } from "@/lib/superAdminService";
 import { setPortalSession, getPortalSession } from "@/lib/authSession";
-import { invalidateDatabaseCache } from "@/lib/dataService";
+import { invalidateDatabaseCache, loadAllDataFromDatabase } from "@/lib/dataService";
 
 export default function ConnexionPage() {
   const router = useRouter();
@@ -36,7 +36,7 @@ export default function ConnexionPage() {
     }
   }, [router]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
     setIsLoading(true);
@@ -47,81 +47,92 @@ export default function ConnexionPage() {
       return;
     }
 
-    // 1. Authentification Super-Administrateur SaaS (Propriétaire de la plateforme GESTIMMO)
-    const superAdmin = authenticateSuperAdmin(loginInput, passwordInput);
-    if (superAdmin) {
-      setPortalSession("SUPER_ADMIN", superAdmin, "SUPER_ADMIN");
-      setPortalSession("ADMIN", { ...superAdmin, role: "Administrateur", userRole: "ADMIN" }, "ADMIN");
-      router.replace("/super-admin");
-      return;
-    }
+    try {
+      // 1. Authentification Super-Administrateur SaaS (Propriétaire de la plateforme GESTIMMO)
+      const superAdmin = authenticateSuperAdmin(loginInput, passwordInput);
+      if (superAdmin) {
+        setPortalSession("SUPER_ADMIN", superAdmin, "SUPER_ADMIN");
+        setPortalSession("ADMIN", { ...superAdmin, role: "Administrateur", userRole: "ADMIN" }, "ADMIN");
+        router.replace("/super-admin");
+        return;
+      }
 
-    // 2. Vérifier si l'agence est suspendue
-    const suspensionCheck = isAgencySuspendedForUser(loginInput);
-    if (suspensionCheck.suspended) {
-      setErrorMsg(
-        `L'abonnement de l'agence "${suspensionCheck.agencyName}" est actuellement suspendu ou expiré. Veuillez contacter le support GESTIMMO.`
-      );
+      // 2. Vérifier si l'agence est suspendue
+      const suspensionCheck = isAgencySuspendedForUser(loginInput);
+      if (suspensionCheck.suspended) {
+        setErrorMsg(
+          `L'abonnement de l'agence "${suspensionCheck.agencyName}" est actuellement suspendu ou expiré. Veuillez contacter le support GESTIMMO.`
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      // 3. Authentification Propriétaire (Locale + Supabase temps réel multi-appareils)
+      const owner = await authenticateProprietaireAsync(loginInput, passwordInput);
+      if (owner) {
+        if (owner.accountStatus === "Inactif") {
+          setErrorMsg("Ce compte Espace Propriétaire a été désactivé. Veuillez contacter votre gestionnaire.");
+          setIsLoading(false);
+          return;
+        }
+        const ownerUser = {
+          ...owner,
+          role: "Propriétaire",
+        };
+        invalidateDatabaseCache();
+        setPortalSession("PROPRIETAIRE", ownerUser);
+        await loadAllDataFromDatabase(true);
+        router.replace("/proprietaire");
+        return;
+      }
+
+      // 4. Authentification Locataire (Locale + Supabase temps réel multi-appareils)
+      const tenant = await authenticateLocataireAsync(loginInput, passwordInput);
+      if (tenant) {
+        if (tenant.accountStatus === "Inactif") {
+          setErrorMsg("Ce compte Espace Locataire a été désactivé. Veuillez contacter votre gestionnaire.");
+          setIsLoading(false);
+          return;
+        }
+        const tenantUser = {
+          ...tenant,
+          role: "Locataire",
+        };
+        invalidateDatabaseCache();
+        setPortalSession("LOCATAIRE", tenantUser);
+        await loadAllDataFromDatabase(true);
+        router.replace("/locataire");
+        return;
+      }
+
+      // 5. Authentification Agence / Collaborateurs (Administrateurs, Gérants, Gestionnaires, Comptables, Agents)
+      const companyUser = await authenticateCompanyUserAsync(loginInput, passwordInput);
+      if (companyUser) {
+        if (companyUser.status === "Inactif") {
+          setErrorMsg("Ce compte utilisateur ou l'abonnement de votre agence a été suspendu. Veuillez contacter l'administration.");
+          setIsLoading(false);
+          return;
+        }
+        const isGerant =
+          companyUser.role?.toUpperCase().includes("GÉRANT") ||
+          companyUser.role?.toUpperCase().includes("GERANT") ||
+          Boolean((companyUser as any).assignedLogements);
+        const roleKey = isGerant ? "GERANT" : companyUser.role?.toUpperCase() || "ADMIN";
+
+        invalidateDatabaseCache();
+        setPortalSession("ADMIN", { ...companyUser, userRole: roleKey });
+        await loadAllDataFromDatabase(true);
+        router.replace("/app");
+        return;
+      }
+
+      setErrorMsg("Identifiant ou mot de passe incorrect. Vérifiez vos identifiants ou contactez votre gestionnaire.");
+    } catch (err) {
+      console.error("Erreur lors de la connexion:", err);
+      setErrorMsg("Une erreur est survenue lors de la connexion. Veuillez réessayer.");
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    // 3. Authentification Locataire
-    const tenant = authenticateLocataire(loginInput, passwordInput);
-    if (tenant) {
-      if (tenant.accountStatus === "Inactif") {
-        setErrorMsg("Ce compte Espace Locataire a été désactivé. Veuillez contacter votre gestionnaire.");
-        setIsLoading(false);
-        return;
-      }
-      const tenantUser = {
-        ...tenant,
-        role: "Locataire",
-      };
-      setPortalSession("LOCATAIRE", tenantUser);
-      router.replace("/locataire");
-      return;
-    }
-
-    // 4. Authentification Propriétaire
-    const owner = authenticateProprietaire(loginInput, passwordInput);
-    if (owner) {
-      if (owner.accountStatus === "Inactif") {
-        setErrorMsg("Ce compte Espace Propriétaire a été désactivé. Veuillez contacter votre gestionnaire.");
-        setIsLoading(false);
-        return;
-      }
-      const ownerUser = {
-        ...owner,
-        role: "Propriétaire",
-      };
-      setPortalSession("PROPRIETAIRE", ownerUser);
-      router.replace("/proprietaire");
-      return;
-    }
-
-    // 5. Authentification Agence / Collaborateurs (Administrateurs, Gérants, Gestionnaires, Comptables, Agents)
-    const companyUser = authenticateCompanyUser(loginInput, passwordInput);
-    if (companyUser) {
-      if (companyUser.status === "Inactif") {
-        setErrorMsg("Ce compte utilisateur ou l'abonnement de votre agence a été suspendu. Veuillez contacter l'administration.");
-        setIsLoading(false);
-        return;
-      }
-      const isGerant =
-        companyUser.role?.toUpperCase().includes("GÉRANT") ||
-        companyUser.role?.toUpperCase().includes("GERANT") ||
-        Boolean((companyUser as any).assignedLogements);
-      const roleKey = isGerant ? "GERANT" : companyUser.role?.toUpperCase() || "ADMIN";
-
-      invalidateDatabaseCache();
-      setPortalSession("ADMIN", { ...companyUser, userRole: roleKey });
-      router.replace("/app");
-      return;
-    }
-
-    setErrorMsg("Identifiant ou mot de passe incorrect. Vérifiez vos identifiants ou contactez votre gestionnaire.");
-    setIsLoading(false);
   };
 
   return (

@@ -52,6 +52,20 @@ export function getActiveCompanyId(): string {
       if (u?.companyId) return u.companyId;
       if (u?.company_id) return u.company_id;
     }
+
+    const ownerUserStr = localStorage.getItem("gestimmo_proprietaire_user");
+    if (ownerUserStr) {
+      const u = JSON.parse(ownerUserStr);
+      if (u?.companyId) return u.companyId;
+      if (u?.company_id) return u.company_id;
+    }
+
+    const tenantUserStr = localStorage.getItem("gestimmo_locataire_user");
+    if (tenantUserStr) {
+      const u = JSON.parse(tenantUserStr);
+      if (u?.companyId) return u.companyId;
+      if (u?.company_id) return u.company_id;
+    }
   } catch (e) {}
   return DEFAULT_MAIN_COMPANY_ID;
 }
@@ -249,9 +263,15 @@ export function setPortalSession(portal: PortalType, user: any, role?: string): 
       localStorage.setItem("gestimmo_admin_user", userJson);
       localStorage.setItem("gestimmo_admin_role", actualRole);
     } else if (portal === 'LOCATAIRE') {
+      if (user.companyId || user.company_id) {
+        localStorage.setItem("gestimmo_active_company_id", user.companyId || user.company_id);
+      }
       localStorage.setItem("gestimmo_locataire_user", userJson);
       localStorage.setItem("gestimmo_locataire_role", "LOCATAIRE");
     } else if (portal === 'PROPRIETAIRE') {
+      if (user.companyId || user.company_id) {
+        localStorage.setItem("gestimmo_active_company_id", user.companyId || user.company_id);
+      }
       localStorage.setItem("gestimmo_proprietaire_user", userJson);
       localStorage.setItem("gestimmo_proprietaire_role", "PROPRIETAIRE");
     }

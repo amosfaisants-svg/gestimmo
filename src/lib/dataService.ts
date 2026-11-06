@@ -675,6 +675,7 @@ export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<Ful
 
       return {
         id: o.id,
+        companyId: o.company_id || activeCompanyId,
         code: o.id_card_number || `PR-${o.id.slice(0, 6)}`,
         type: localMatch?.type || "particulier",
         name: o.full_name,
@@ -684,7 +685,7 @@ export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<Ful
         commissionRate: (o.commission_rate !== undefined && o.commission_rate !== null) ? Number(o.commission_rate) : (localMatch?.commissionRate ?? 10),
         login: finalLogin,
         password: finalPass,
-        accountStatus: localMatch?.accountStatus || "Actif",
+        accountStatus: (o.account_status && String(o.account_status).toLowerCase().startsWith("inactif")) ? "Inactif" : (localMatch?.accountStatus || "Actif"),
         dateAdded: localMatch?.dateAdded || "01 Janv 2026",
         modeReversement: localMatch?.modeReversement || "Virement Bancaire (Mensuel)",
         nomBanque: localMatch?.nomBanque || "",
@@ -884,6 +885,7 @@ export const loadAllDataFromDatabase = async (forceRefresh = false): Promise<Ful
 
       return {
         id: t.id,
+        companyId: t.company_id || activeCompanyId,
         name: t.full_name,
         email: t.email || localMatch?.email || "",
         phone: t.phone || localMatch?.phone || "",
