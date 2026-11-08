@@ -456,31 +456,33 @@ export default function RapportsPage() {
     const initData = async () => {
       const dbState = await loadAllDataFromDatabase();
       if (dbState) {
-        setOwners(dbState.owners && dbState.owners.length > 0 ? dbState.owners : defaultOwners);
-        setBiens(dbState.properties && dbState.properties.length > 0 ? dbState.properties : defaultBiens);
-        setLogements(dbState.units && dbState.units.length > 0 ? dbState.units : defaultLogements);
-        setBaux(dbState.leases && dbState.leases.length > 0 ? dbState.leases : defaultBaux);
-        setPaiements(syncPaymentsWithLeases(dbState.payments && dbState.payments.length > 0 ? dbState.payments : defaultPaiements, dbState.leases && dbState.leases.length > 0 ? dbState.leases : defaultBaux));
-        setGerants(dbState.profiles && dbState.profiles.length > 0 ? dbState.profiles : defaultManagers);
+        const bList = dbState.leases || [];
+        const pList = dbState.payments || [];
+        setOwners(dbState.owners || []);
+        setBiens(dbState.properties || []);
+        setLogements(dbState.units || []);
+        setBaux(bList);
+        setPaiements(syncPaymentsWithLeases(pList, bList));
+        setGerants(dbState.profiles || []);
       } else {
         const storedOwners = localStorage.getItem("gestimmo_proprietaires");
-        setOwners(storedOwners ? JSON.parse(storedOwners) : defaultOwners);
+        setOwners(storedOwners ? JSON.parse(storedOwners) : []);
 
         const storedBiens = localStorage.getItem("gestimmo_biens");
-        setBiens(storedBiens ? JSON.parse(storedBiens) : defaultBiens);
+        setBiens(storedBiens ? JSON.parse(storedBiens) : []);
 
         const storedLogements = localStorage.getItem("gestimmo_logements");
-        setLogements(storedLogements ? JSON.parse(storedLogements) : defaultLogements);
+        setLogements(storedLogements ? JSON.parse(storedLogements) : []);
 
         const storedBaux = localStorage.getItem("gestimmo_baux");
-        const bList = storedBaux ? JSON.parse(storedBaux) : defaultBaux;
+        const bList = storedBaux ? JSON.parse(storedBaux) : [];
         setBaux(bList);
 
         const storedGerants = localStorage.getItem("gestimmo_equipe");
-        setGerants(storedGerants ? JSON.parse(storedGerants) : defaultManagers);
+        setGerants(storedGerants ? JSON.parse(storedGerants) : []);
 
         const storedPaiements = localStorage.getItem("gestimmo_paiements");
-        const pList = storedPaiements ? JSON.parse(storedPaiements) : defaultPaiements;
+        const pList = storedPaiements ? JSON.parse(storedPaiements) : [];
         setPaiements(syncPaymentsWithLeases(pList, bList));
       }
     };
@@ -2035,7 +2037,55 @@ export default function RapportsPage() {
   const totalOccupesOverview = logements.filter((l: any) => l.status === "Occupé" || l.status === "OCCUPÉ" || (l.tenant && l.tenant !== "-")).length;
   const totalPreavisOverview = logements.filter((l: any) => l.status === "En préavis" || l.status === "EN_PRÉAVIS").length;
   const totalVacantsOverview = Math.max(0, totalLogementsOverview - totalOccupesOverview - totalPreavisOverview);
-  const tauxOccupationOverview = totalLogementsOverview > 0 ? Math.round((totalOccupesOverview / totalLogementsOverview) * 100) : (totalOccupesOverview > 0 ? 100 : 0);
+  const tauxOccupationOverview = totalLogementsOverview > 0 ? Math.round((totalOccupesOverview / totalLogementsOverview) * 100) : 0;
+  const tauxPreavisOverview = totalLogementsOverview > 0 ? Math.round((totalPreavisOverview / totalLogementsOverview) * 100) : 0;
+
+  // Calcul dynamique de l'évolution mensuelle du recouvrement à partir des données réelles de l'agence
+  const selectedYearMatch = periodFilter.match(/\d{4}/);
+  const chartYear = selectedYearMatch ? selectedYearMatch[0] : String(new Date().getFullYear());
+  const expectedMonthlyRent = logements
+    .filter((l: any) => l.status === "Occupé" || l.status === "OCCUPÉ" || (l.tenant && l.tenant !== "-"))
+    .reduce((sum: number, l: any) => sum + (Number(l.rent || l.loyer) || 0), 0);
+
+  const chartMonths = [
+    { short: "Jan", full: `Janvier ${chartYear}` },
+    { short: "Fév", full: `Février ${chartYear}` },
+    { short: "Mar", full: `Mars ${chartYear}` },
+    { short: "Avr", full: `Avril ${chartYear}` },
+    { short: "Mai", full: `Mai ${chartYear}` },
+    { short: "Jun", full: `Juin ${chartYear}` },
+    { short: "Jul", full: `Juillet ${chartYear}` },
+    { short: "Aoû", full: `Août ${chartYear}` },
+    { short: "Sep", full: `Septembre ${chartYear}` },
+    { short: "Oct", full: `Octobre ${chartYear}` },
+    { short: "Nov", full: `Novembre ${chartYear}` },
+    { short: "Déc", full: `Décembre ${chartYear}` },
+  ];
+
+  const monthlyPaidTotals = chartMonths.map((m) =>
+    paiements
+      .filter((p: any) => {
+        const status = (p.status || p.statut || "").toUpperCase();
+        const isValid = status === "VALIDÉ" || status === "VALIDE" || status === "PAYÉ" || status === "PAYE" || status === "EFFECTUÉ";
+        return isValid && matchesPeriod(p, m.full);
+      })
+      .reduce((sum: number, p: any) => sum + (Number(p.amount || p.montant) || 0), 0)
+  );
+
+  const maxMonthlyPaid = Math.max(...monthlyPaidTotals, 0);
+  const monthlyRecouvrementRates = monthlyPaidTotals.map((amt) => {
+    if (amt <= 0) return 0;
+    if (expectedMonthlyRent > 0) {
+      return Math.min(100, Math.round((amt / expectedMonthlyRent) * 100));
+    }
+    return maxMonthlyPaid > 0 ? Math.min(100, Math.round((amt / maxMonthlyPaid) * 100)) : 0;
+  });
+
+  const activeMonthsRates = monthlyRecouvrementRates.filter((r) => r > 0);
+  const moyenneAnnuelleOverview =
+    activeMonthsRates.length > 0
+      ? Math.round(activeMonthsRates.reduce((a, b) => a + b, 0) / activeMonthsRates.length)
+      : 0;
 
   return (
     <div className="space-y-6 pt-12 md:pt-0 pb-12">
@@ -2077,21 +2127,24 @@ export default function RapportsPage() {
               <div className="w-full border-t border-dashed border-gray-200"></div>
             </div>
             
-            {[65, 78, 85, 90, 82, 88, 92, 94, 91].map((val, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center gap-2 z-10 group">
-                <div className="w-full bg-primary/20 hover:bg-primary rounded-t-sm transition-colors relative flex-1 flex items-end">
-                  <div className="w-full bg-primary rounded-t-sm transition-all" style={{ height: `${val}%` }}></div>
+            {chartMonths.map((m, i) => {
+              const val = monthlyRecouvrementRates[i];
+              return (
+                <div key={m.short} className="flex-1 flex flex-col items-center gap-2 z-10 group" title={`${m.full} : ${formatFCFA(monthlyPaidTotals[i])} (${val}%)`}>
+                  <div className="w-full bg-gray-100/70 rounded-t-sm transition-colors relative flex-1 flex items-end">
+                    <div className="w-full bg-primary rounded-t-sm transition-all" style={{ height: `${val}%` }}></div>
+                  </div>
+                  <span className="text-[10px] text-gray-400">
+                    {m.short}
+                  </span>
                 </div>
-                <span className="text-[10px] text-gray-400">
-                  {['Jan', 'Fev', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aou', 'Sep'][i]}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="flex justify-between mt-4">
             <div>
               <p className="text-xs text-gray-500">Moyenne annuelle</p>
-              <p className="text-lg font-bold text-gray-900">{tauxOccupationOverview}%</p>
+              <p className="text-lg font-bold text-gray-900">{moyenneAnnuelleOverview}%</p>
             </div>
             <div className="text-right">
               <p className="text-xs text-gray-500">Total Encaissé</p>
@@ -2107,18 +2160,25 @@ export default function RapportsPage() {
             Répartition de l'Occupation (Actuel)
           </h2>
           <div className="flex-1 flex items-center justify-center">
-            <div className="relative w-48 h-48 rounded-full border-[24px] border-green-500 flex items-center justify-center">
-              <div className="absolute inset-[-24px] rounded-full border-[24px] border-orange-400" style={{ clipPath: 'polygon(50% 50%, 100% 0, 100% 30%)' }}></div>
-              <div className="absolute inset-[-24px] rounded-full border-[24px] border-gray-200" style={{ clipPath: 'polygon(50% 50%, 100% 30%, 100% 50%)' }}></div>
-              
-              <Link 
-                href="/app/logements?status=Occupés"
-                className="text-center group p-3 rounded-full hover:bg-gray-50 transition-colors cursor-pointer"
-                title="Cliquer pour voir la liste des maisons occupées"
-              >
-                <p className="text-3xl font-bold text-gray-900 group-hover:text-primary transition-colors">{tauxOccupationOverview}%</p>
-                <p className="text-xs text-gray-500 group-hover:text-primary font-medium transition-colors">Occupé</p>
-              </Link>
+            <div
+              className="relative w-48 h-48 rounded-full flex items-center justify-center"
+              style={{
+                background:
+                  totalLogementsOverview === 0
+                    ? "#e5e7eb"
+                    : `conic-gradient(#22c55e 0% ${tauxOccupationOverview}%, #fb923c ${tauxOccupationOverview}% ${tauxOccupationOverview + tauxPreavisOverview}%, #d1d5db ${tauxOccupationOverview + tauxPreavisOverview}% 100%)`,
+              }}
+            >
+              <div className="w-36 h-36 rounded-full bg-white flex items-center justify-center">
+                <Link 
+                  href="/app/logements?status=Occupés"
+                  className="text-center group p-3 rounded-full hover:bg-gray-50 transition-colors cursor-pointer"
+                  title="Cliquer pour voir la liste des maisons occupées"
+                >
+                  <p className="text-3xl font-bold text-gray-900 group-hover:text-primary transition-colors">{tauxOccupationOverview}%</p>
+                  <p className="text-xs text-gray-500 group-hover:text-primary font-medium transition-colors">Occupé</p>
+                </Link>
+              </div>
             </div>
           </div>
           <div className="flex flex-wrap justify-center gap-3 sm:gap-6 mt-6 pt-6 border-t border-app-border">

@@ -157,28 +157,22 @@ export default function GerantsPage() {
         });
         setManagers(mappedProfiles);
         localStorage.setItem("gestimmo_equipe", JSON.stringify(mappedProfiles));
+        setAllLogements(dbState.units || []);
+        setBaux(dbState.leases || []);
+        setPaiements(dbState.payments || []);
       } else {
         const storedManagers = localStorage.getItem("gestimmo_equipe");
-        if (storedManagers) {
-          setManagers(JSON.parse(storedManagers));
-        } else {
-          setManagers(initialManagers);
-          localStorage.setItem("gestimmo_equipe", JSON.stringify(initialManagers));
-        }
+        setManagers(storedManagers ? JSON.parse(storedManagers) : []);
+
+        const storedLogements = localStorage.getItem("gestimmo_logements");
+        setAllLogements(storedLogements ? JSON.parse(storedLogements) : []);
+
+        const storedBaux = localStorage.getItem("gestimmo_baux");
+        setBaux(storedBaux ? JSON.parse(storedBaux) : []);
+
+        const storedPaiements = localStorage.getItem("gestimmo_paiements");
+        setPaiements(storedPaiements ? JSON.parse(storedPaiements) : []);
       }
-
-      const storedLogements = localStorage.getItem("gestimmo_logements");
-      if (storedLogements) {
-        setAllLogements(JSON.parse(storedLogements));
-      } else {
-        setAllLogements(defaultLogements);
-      }
-
-      const storedBaux = localStorage.getItem("gestimmo_baux");
-      if (storedBaux) setBaux(JSON.parse(storedBaux));
-
-      const storedPaiements = localStorage.getItem("gestimmo_paiements");
-      if (storedPaiements) setPaiements(JSON.parse(storedPaiements));
     };
 
     initData();
