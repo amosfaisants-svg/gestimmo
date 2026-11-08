@@ -208,33 +208,44 @@ export default function SidebarProprietaire() {
   return (
     <>
       {/* Barre supérieure mobile */}
-      <div className="md:hidden fixed top-0 inset-x-0 z-40 h-14 bg-white border-b border-app-border px-4 flex items-center justify-between shadow-xs print:hidden">
+      <div className="md:hidden fixed top-0 inset-x-0 z-40 h-14 bg-white border-b border-app-border px-3 flex items-center justify-between shadow-xs print:hidden">
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className="p-2 -ml-1 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer flex items-center gap-2"
+          className="p-2 -ml-1 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
           aria-label="Ouvrir le menu"
         >
           {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           <span className="text-xs font-semibold text-gray-700">Menu</span>
         </button>
 
-        <div className="text-center">
-          <span className="text-base font-bold text-primary tracking-tight">GESTIMMO</span>
+        <div className="text-center min-w-0 px-1 truncate">
+          <span className="text-sm font-bold text-primary tracking-tight">GESTIMMO</span>
           <span className="ml-1.5 text-[10px] font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
             Propriétaire
           </span>
         </div>
 
-        <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-primary font-bold text-xs">
-          {initials}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary font-bold text-[11px] shrink-0">
+            {initials}
+          </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 transition-colors cursor-pointer shrink-0"
+            title="Se déconnecter"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span>Déconnexion</span>
+          </button>
         </div>
       </div>
 
       {/* Tiroir / Sidebar */}
       <div
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-app-border flex flex-col min-h-screen transform transition-transform duration-200 ease-in-out md:translate-x-0 md:static print:hidden",
+          "fixed inset-y-0 left-0 z-50 w-64 h-[100dvh] max-h-[100dvh] overflow-y-auto bg-white border-r border-app-border flex flex-col md:min-h-screen transform transition-transform duration-200 ease-in-out md:translate-x-0 md:static print:hidden",
           isOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
         )}
       >
@@ -294,7 +305,7 @@ export default function SidebarProprietaire() {
           })}
         </nav>
 
-        <div className="p-4 border-t border-app-border">
+        <div className="p-4 pb-8 md:pb-4 border-t border-app-border mt-auto shrink-0">
           <div className="bg-gray-50 rounded-xl p-4 flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center text-primary font-bold text-sm shrink-0">
               {initials}
@@ -307,9 +318,9 @@ export default function SidebarProprietaire() {
           <button
             type="button"
             onClick={handleLogout}
-            className="w-full mt-2 flex items-center justify-center px-4 py-2.5 text-sm font-medium text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
+            className="w-full mt-2 flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-red-600 bg-red-50/70 hover:bg-red-100 rounded-xl transition-colors cursor-pointer"
           >
-            <LogOut className="w-4 h-4 mr-2" /> Déconnexion
+            <LogOut className="w-4 h-4 mr-2" /> Se déconnecter
           </button>
         </div>
       </div>
