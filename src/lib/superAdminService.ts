@@ -246,7 +246,7 @@ export async function syncAgenciesWithSupabase(): Promise<SaaSAgency[]> {
       supabase.from("properties").select("id, company_id"),
       supabase.from("units").select("id, property_id"),
       supabase.from("tenants").select("id, company_id"),
-      supabase.from("profiles").select("id, company_id, full_name, email, phone, role"),
+      supabase.from("profiles").select("id, company_id, full_name, email, phone, role, permissions"),
     ]);
 
     const dbCompanies: any[] = companiesRes.data || [];
@@ -272,12 +272,21 @@ export async function syncAgenciesWithSupabase(): Promise<SaaSAgency[]> {
       const vaultCreds = getStoredVaultCredential("equipe", comp.id);
 
       if (existing) {
+        const syncedPass = adminProfile?.permissions?.password || existing.password;
+        if (existing.password && adminProfile && !adminProfile.permissions?.password) {
+          (supabase.from("profiles") as any)
+            .update({ permissions: { ...(adminProfile.permissions || {}), all: true, password: existing.password } })
+            .eq("id", adminProfile.id)
+            .then(() => {})
+            .catch(() => {});
+        }
         mergedMap.set(comp.id, {
           ...existing,
           name: comp.name || existing.name,
           email: comp.email || existing.email,
           phone: comp.phone || existing.phone,
           address: comp.address || existing.address,
+          password: syncedPass,
           propertiesCount: compProps.length,
           unitsCount: compUnits.length,
           tenantsCount: compTenants.length,
@@ -287,6 +296,7 @@ export async function syncAgenciesWithSupabase(): Promise<SaaSAgency[]> {
         const createdDate = comp.created_at ? comp.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
         const endDateObj = new Date(createdDate);
         endDateObj.setDate(endDateObj.getDate() + 30);
+        const remotePassword = adminProfile?.permissions?.password || vaultCreds?.password || "Agence1234!";
 
         mergedMap.set(comp.id, {
           id: comp.id,
@@ -296,7 +306,7 @@ export async function syncAgenciesWithSupabase(): Promise<SaaSAgency[]> {
           phone: comp.phone || adminProfile?.phone || "",
           address: comp.address || "Côte d'Ivoire",
           login: vaultCreds?.login || comp.email || adminProfile?.email || "",
-          password: vaultCreds?.password || "Agence1234!",
+          password: remotePassword,
           plan: validPlan,
           monthlyFee: SAAS_PLANS[validPlan].monthlyPrice,
           status: "Actif",
@@ -480,7 +490,7 @@ export async function registerNewSaaSAgency(input: {
         email: cleanEmail,
         phone: cleanPhone,
         role: "ADMINISTRATEUR",
-        permissions: { all: true },
+        permissions: { all: true, password: input.password },
       });
     } catch (err) {
       console.error("Erreur sauvegarde Supabase nouvelle agence:", err);

@@ -318,11 +318,6 @@ function matchesOwnerRecord(o: any, loginInput: string, passwordInput: string): 
 
   const validPasswords = new Set<string>([
     ...computeOwnerCandidatePasswords(rawName, o.id, o.code || o.id_card_number || (o.id ? `PR-${String(o.id).slice(0, 6)}` : "")),
-    "Prop1234!",
-    "proprietaire",
-    "123456",
-    "1234",
-    "gestimmo",
   ]);
 
   if (vaultCred?.password && !String(vaultCred.password).includes("••••")) {
@@ -339,10 +334,7 @@ function matchesOwnerRecord(o: any, loginInput: string, passwordInput: string): 
   }
 
   for (const candidate of Array.from(validPasswords)) {
-    if (
-      inputPass === candidate ||
-      inputPass.toLowerCase() === candidate.toLowerCase()
-    ) {
+    if (inputPass === candidate) {
       return true;
     }
   }

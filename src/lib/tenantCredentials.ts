@@ -342,11 +342,6 @@ function matchesTenantRecord(t: any, loginInput: string, passwordInput: string):
 
   const validPasswords = new Set<string>([
     ...computeTenantCandidatePasswords(rawName, t.id),
-    "Loca1234!",
-    "locataire",
-    "123456",
-    "1234",
-    "gestimmo",
   ]);
 
   if (vaultCred?.password && !String(vaultCred.password).includes("••••")) {
@@ -363,7 +358,7 @@ function matchesTenantRecord(t: any, loginInput: string, passwordInput: string):
   }
 
   for (const candidate of Array.from(validPasswords)) {
-    if (inputPass === candidate || inputPass.toLowerCase() === candidate.toLowerCase()) {
+    if (inputPass === candidate) {
       return true;
     }
   }

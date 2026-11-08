@@ -136,7 +136,6 @@ export function getCompanyUsers(): UserAccount[] {
     try {
       const parsed: any[] = JSON.parse(storedRaw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Normalize loaded users
         const normalized: UserAccount[] = parsed.map((u: any, idx: number) => ({
           id: u.id || `USR-${String(idx + 1).padStart(3, "0")}`,
           companyId: u.companyId || u.company_id || undefined,
@@ -152,7 +151,6 @@ export function getCompanyUsers(): UserAccount[] {
           permissions: u.permissions || getDefaultPermissions(u.role || "Gestionnaire"),
         }));
 
-        // Ensure default users exist in list if missing
         defaultCompanyUsersList.forEach((defUser) => {
           const exists = normalized.some(
             (u) =>
@@ -173,7 +171,6 @@ export function getCompanyUsers(): UserAccount[] {
     }
   }
 
-  // Fallback to default list
   localStorage.setItem("gestimmo_company_users", JSON.stringify(defaultCompanyUsersList));
   return defaultCompanyUsersList;
 }
@@ -227,160 +224,18 @@ export const defaultGerantsList = [
 ];
 
 /**
- * Authenticates a company user or gérant by email/login/phone/name and password
+ * Authenticates a company user, SaaS agency, or gérant with STRICT password verification.
+ * Any wrong password for a known account immediately returns null (no fallback bypass).
  */
 export function authenticateCompanyUser(loginInput: string, passwordInput: string): UserAccount | null {
   if (typeof window === "undefined") return null;
 
   const cleanInput = loginInput.trim().toLowerCase();
   const digitsOnlyInput = loginInput.replace(/\D/g, "");
+  const inputPass = passwordInput.trim();
+  if (!cleanInput || !inputPass) return null;
 
-  // 1. Check Equipe / Gérants list (merged with defaultGerantsList)
-  let equipe: any[] = [];
-  const storedEquipe = localStorage.getItem("gestimmo_equipe");
-  if (storedEquipe) {
-    try {
-      equipe = JSON.parse(storedEquipe);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  // Ensure default managers are merged
-  defaultGerantsList.forEach((defM) => {
-    if (!equipe.some((m) => (m.email && m.email.toLowerCase() === defM.email.toLowerCase()) || (m.name && m.name.toLowerCase() === defM.name.toLowerCase()) || m.id === defM.id)) {
-      equipe.push(defM);
-    }
-  });
-
-  const matchedGerant = equipe.find((m) => {
-    const mLogin = (m.login || m.email || "").trim().toLowerCase();
-    const mEmail = (m.email || "").trim().toLowerCase();
-    const mName = (m.name || "").trim().toLowerCase();
-    const mId = (m.id || "").trim().toLowerCase();
-    const mPhoneDigits = (m.phone || "").replace(/\D/g, "");
-
-    const matchesEmail = mEmail.length > 0 && (cleanInput === mEmail || cleanInput === mLogin);
-    const matchesId = mId.length > 0 && cleanInput === mId;
-    const matchesName = mName.length > 0 && (cleanInput === mName || (cleanInput.length > 2 && mName.includes(cleanInput)));
-    const matchesPhone = digitsOnlyInput.length >= 4 && mPhoneDigits.length >= 4 && (mPhoneDigits.includes(digitsOnlyInput) || digitsOnlyInput.includes(mPhoneDigits));
-
-    return matchesEmail || matchesId || matchesName || matchesPhone;
-  });
-
-  if (matchedGerant) {
-    if (matchedGerant.status === "Inactif") {
-      return null;
-    }
-
-    let storedPass = (matchedGerant.password || "").trim();
-    if (!storedPass || storedPass.includes("••••") || storedPass.includes("••")) {
-      const vaultPass = getStoredVaultCredential(matchedGerant.id, "password");
-      storedPass = vaultPass || "Gerant1234!";
-    }
-
-    const inputPass = passwordInput.trim();
-
-    const isPasswordValid =
-      inputPass === storedPass ||
-      inputPass.toLowerCase() === storedPass.toLowerCase() ||
-      inputPass === "Gerant1234!" ||
-      inputPass === "Admin1234!" ||
-      inputPass.toLowerCase() === "gerant" ||
-      inputPass.toLowerCase() === "admin" ||
-      inputPass === "gestimmo" ||
-      inputPass === "123456" ||
-      inputPass === "1234";
-
-    if (isPasswordValid) {
-      const realPass = storedPass || "Gerant1234!";
-      saveStoredVaultCredential(matchedGerant.id, "password", realPass);
-      return {
-        id: matchedGerant.id,
-        name: matchedGerant.name,
-        email: matchedGerant.email || matchedGerant.login || "",
-        phone: matchedGerant.phone || "",
-        login: matchedGerant.login || matchedGerant.email || matchedGerant.name?.toLowerCase().replace(/\s+/g, "."),
-        password: realPass,
-        role: matchedGerant.role || "Gérant",
-        status: matchedGerant.status || "Actif",
-        assignedLogements: matchedGerant.assignedLogements || (matchedGerant.id === "M-002" ? ["A-101", "V-001"] : []),
-        gerantPermissions: matchedGerant.gerantPermissions || {
-          canViewReceipts: true,
-          canManageContracts: true,
-          canManageDocuments: true,
-          canManageLogements: true,
-        },
-        dateAdded: matchedGerant.dateAdded || "01 Janv 2026",
-        permissions: matchedGerant.permissions || getDefaultPermissions(matchedGerant.role || "Gestionnaire"),
-      } as any;
-    }
-  }
-
-  // 2. Check standard Company Users list
-  const companyUsers = getCompanyUsers();
-
-  const matchedUser = companyUsers.find((u) => {
-    const uLogin = (u.login || "").trim().toLowerCase();
-    const uEmail = (u.email || "").trim().toLowerCase();
-    const uName = (u.name || "").trim().toLowerCase();
-    const uId = (u.id || "").trim().toLowerCase();
-    const uPhoneDigits = (u.phone || "").replace(/\D/g, "");
-
-    const matchesEmail = uEmail.length > 0 && (cleanInput === uEmail || cleanInput === uLogin);
-    const matchesId = uId.length > 0 && cleanInput === uId;
-    const matchesName = uName.length > 0 && (cleanInput === uName || (cleanInput.length > 2 && uName.includes(cleanInput)));
-    const matchesPhone = digitsOnlyInput.length >= 4 && uPhoneDigits.length >= 4 && (uPhoneDigits.includes(digitsOnlyInput) || digitsOnlyInput.includes(uPhoneDigits));
-
-    return matchesEmail || matchesId || matchesName || matchesPhone;
-  });
-
-  if (matchedUser) {
-    let storedPass = (matchedUser.password || "").trim();
-    if (!storedPass || storedPass.includes("••••") || storedPass.includes("••")) {
-      const vaultPass = getStoredVaultCredential(matchedUser.id, "password");
-      storedPass = vaultPass || "Gest1234!";
-    }
-    const inputPass = passwordInput.trim();
-
-    const isPasswordValid =
-      inputPass === storedPass ||
-      inputPass.toLowerCase() === storedPass.toLowerCase() ||
-      inputPass === "Admin1234!" ||
-      inputPass === "Gest1234!" ||
-      inputPass.toLowerCase() === "admin" ||
-      inputPass.toLowerCase() === "gestionnaire" ||
-      inputPass.toLowerCase() === "comptable" ||
-      inputPass.toLowerCase() === "agent" ||
-      inputPass === "gestimmo" ||
-      inputPass === "123456" ||
-      inputPass === "1234";
-
-    if (isPasswordValid) {
-      saveStoredVaultCredential(matchedUser.id, "password", storedPass);
-      // Si l'utilisateur correspond à une agence SaaS mais n'avait pas encore de companyId, on lui rattache
-      if (!matchedUser.companyId) {
-        try {
-          const rawAg = localStorage.getItem("gestimmo_saas_agencies");
-          if (rawAg) {
-            const agList: any[] = JSON.parse(rawAg);
-            const foundAg = agList.find(
-              (a) =>
-                (a.email || "").trim().toLowerCase() === (matchedUser.email || "").trim().toLowerCase() ||
-                (a.login || "").trim().toLowerCase() === (matchedUser.login || "").trim().toLowerCase()
-            );
-            if (foundAg) {
-              matchedUser.companyId = foundAg.id;
-              matchedUser.companyName = foundAg.name;
-            }
-          }
-        } catch (e) {}
-      }
-      return matchedUser;
-    }
-  }
-
-  // 3. Check SaaS Agencies list (pour les agences inscrites via /inscription ou créées dans /super-admin)
+  // 1. Vérifier en priorité les agences SaaS inscrites (source de vérité des accès Administrateur d'agence)
   try {
     const rawAgencies = localStorage.getItem("gestimmo_saas_agencies");
     if (rawAgencies) {
@@ -388,10 +243,20 @@ export function authenticateCompanyUser(loginInput: string, passwordInput: strin
       const matchedAgency = agencies.find((ag) => {
         const agEmail = (ag.email || "").trim().toLowerCase();
         const agLogin = (ag.login || "").trim().toLowerCase();
-        return cleanInput === agEmail || cleanInput === agLogin;
+        const agPhoneDigits = String(ag.phone || "").replace(/\D/g, "");
+        return (
+          (agEmail && cleanInput === agEmail) ||
+          (agLogin && cleanInput === agLogin) ||
+          (digitsOnlyInput.length >= 8 && agPhoneDigits.length >= 8 && agPhoneDigits === digitsOnlyInput)
+        );
       });
 
-      if (matchedAgency && passwordInput.trim() === (matchedAgency.password || "").trim()) {
+      if (matchedAgency) {
+        const expectedPass = String(matchedAgency.password || "").trim();
+        // Vérification STRICTE du mot de passe de l'agence : si le mot de passe est faux, bloquer immédiatement !
+        if (!expectedPass || inputPass !== expectedPass) {
+          return null;
+        }
         return {
           id: matchedAgency.id,
           companyId: matchedAgency.id,
@@ -412,11 +277,181 @@ export function authenticateCompanyUser(loginInput: string, passwordInput: strin
     console.error("Erreur lecture agences SaaS lors de la connexion:", e);
   }
 
+  // 2. Vérifier la liste des utilisateurs d'entreprise (gestimmo_company_users)
+  const companyUsers = getCompanyUsers();
+  const matchedUser = companyUsers.find((u) => {
+    const uLogin = (u.login || "").trim().toLowerCase();
+    const uEmail = (u.email || "").trim().toLowerCase();
+    const uName = (u.name || "").trim().toLowerCase();
+    const uId = (u.id || "").trim().toLowerCase();
+    const uPhoneDigits = String(u.phone || "").replace(/\D/g, "");
+
+    const matchesEmail = uEmail.length > 0 && (cleanInput === uEmail || cleanInput === uLogin);
+    const matchesId = uId.length > 0 && cleanInput === uId;
+    const matchesName = uName.length > 0 && cleanInput === uName;
+    const matchesPhone = digitsOnlyInput.length >= 8 && uPhoneDigits.length >= 8 && uPhoneDigits === digitsOnlyInput;
+
+    return matchesEmail || matchesId || matchesName || matchesPhone;
+  });
+
+  if (matchedUser) {
+    let storedPass = (matchedUser.password || "").trim();
+    if (!storedPass || storedPass.includes("••••") || storedPass.includes("••")) {
+      const vaultPass = getStoredVaultCredential(matchedUser.id, "password");
+      storedPass = vaultPass ? String(vaultPass).trim() : "";
+    }
+
+    // Vérification STRICTE du mot de passe : aucun mot de passe générique n'est toléré
+    if (!storedPass || inputPass !== storedPass) {
+      return null;
+    }
+
+    saveStoredVaultCredential(matchedUser.id, "password", storedPass);
+    if (!matchedUser.companyId) {
+      try {
+        const rawAg = localStorage.getItem("gestimmo_saas_agencies");
+        if (rawAg) {
+          const agList: any[] = JSON.parse(rawAg);
+          const foundAg = agList.find(
+            (a) =>
+              (a.email || "").trim().toLowerCase() === (matchedUser.email || "").trim().toLowerCase() ||
+              (a.login || "").trim().toLowerCase() === (matchedUser.login || "").trim().toLowerCase()
+          );
+          if (foundAg) {
+            matchedUser.companyId = foundAg.id;
+            matchedUser.companyName = foundAg.name;
+          }
+        }
+      } catch {}
+    }
+    return matchedUser;
+  }
+
+  // 3. Vérifier la liste Équipe / Gérants (gestimmo_equipe)
+  let equipe: any[] = [];
+  const storedEquipe = localStorage.getItem("gestimmo_equipe");
+  if (storedEquipe) {
+    try {
+      equipe = JSON.parse(storedEquipe);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  defaultGerantsList.forEach((defM) => {
+    if (!equipe.some((m) => (m.email && m.email.toLowerCase() === defM.email.toLowerCase()) || (m.name && m.name.toLowerCase() === defM.name.toLowerCase()) || m.id === defM.id)) {
+      equipe.push(defM);
+    }
+  });
+
+  const matchedGerant = equipe.find((m) => {
+    const mLogin = (m.login || m.email || "").trim().toLowerCase();
+    const mEmail = (m.email || "").trim().toLowerCase();
+    const mName = (m.name || "").trim().toLowerCase();
+    const mId = (m.id || "").trim().toLowerCase();
+    const mPhoneDigits = String(m.phone || "").replace(/\D/g, "");
+
+    const matchesEmail = mEmail.length > 0 && (cleanInput === mEmail || cleanInput === mLogin);
+    const matchesId = mId.length > 0 && cleanInput === mId;
+    const matchesName = mName.length > 0 && cleanInput === mName;
+    const matchesPhone = digitsOnlyInput.length >= 8 && mPhoneDigits.length >= 8 && mPhoneDigits === digitsOnlyInput;
+
+    return matchesEmail || matchesId || matchesName || matchesPhone;
+  });
+
+  if (matchedGerant) {
+    if (matchedGerant.status === "Inactif") {
+      return null;
+    }
+
+    let storedPass = (matchedGerant.password || "").trim();
+    if (!storedPass || storedPass.includes("••••") || storedPass.includes("••")) {
+      const vaultPass = getStoredVaultCredential(matchedGerant.id, "password");
+      storedPass = vaultPass ? String(vaultPass).trim() : "";
+    }
+
+    // Vérification STRICTE du mot de passe du gérant
+    if (!storedPass || inputPass !== storedPass) {
+      return null;
+    }
+
+    saveStoredVaultCredential(matchedGerant.id, "password", storedPass);
+    return {
+      id: matchedGerant.id,
+      name: matchedGerant.name,
+      email: matchedGerant.email || matchedGerant.login || "",
+      phone: matchedGerant.phone || "",
+      login: matchedGerant.login || matchedGerant.email || matchedGerant.name?.toLowerCase().replace(/\s+/g, "."),
+      password: storedPass,
+      role: matchedGerant.role || "Gérant",
+      status: matchedGerant.status || "Actif",
+      assignedLogements: matchedGerant.assignedLogements || (matchedGerant.id === "M-002" ? ["A-101", "V-001"] : []),
+      gerantPermissions: matchedGerant.gerantPermissions || {
+        canViewReceipts: true,
+        canManageContracts: true,
+        canManageDocuments: true,
+        canManageLogements: true,
+      },
+      dateAdded: matchedGerant.dateAdded || "01 Janv 2026",
+      permissions: matchedGerant.permissions || getDefaultPermissions(matchedGerant.role || "Gestionnaire"),
+    } as any;
+  }
+
   return null;
 }
 
 /**
- * Authentifie un utilisateur d'agence / collaborateur depuis N'IMPORTE QUEL ordinateur via localStorage + Supabase
+ * Vérifie si un identifiant est déjà connu dans le stockage local de ce navigateur.
+ * Si oui, on ne doit jamais contourner un échec de mot de passe local via Supabase.
+ */
+function isKnownLocalCompanyIdentifier(loginInput: string): boolean {
+  if (typeof window === "undefined") return false;
+  const cleanInput = loginInput.trim().toLowerCase();
+  const digitsOnlyInput = loginInput.replace(/\D/g, "");
+
+  try {
+    const rawAgencies = localStorage.getItem("gestimmo_saas_agencies");
+    if (rawAgencies) {
+      const agencies: any[] = JSON.parse(rawAgencies);
+      if (
+        agencies.some((ag) => {
+          const agEmail = (ag.email || "").trim().toLowerCase();
+          const agLogin = (ag.login || "").trim().toLowerCase();
+          const agPhone = String(ag.phone || "").replace(/\D/g, "");
+          return (
+            (agEmail && cleanInput === agEmail) ||
+            (agLogin && cleanInput === agLogin) ||
+            (digitsOnlyInput.length >= 8 && agPhone.length >= 8 && agPhone === digitsOnlyInput)
+          );
+        })
+      ) {
+        return true;
+      }
+    }
+  } catch {}
+
+  const companyUsers = getCompanyUsers();
+  if (
+    companyUsers.some((u) => {
+      const uEmail = (u.email || "").trim().toLowerCase();
+      const uLogin = (u.login || "").trim().toLowerCase();
+      const uPhone = String(u.phone || "").replace(/\D/g, "");
+      return (
+        (uEmail && cleanInput === uEmail) ||
+        (uLogin && cleanInput === uLogin) ||
+        (digitsOnlyInput.length >= 8 && uPhone.length >= 8 && uPhone === digitsOnlyInput)
+      );
+    })
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Authentifie un utilisateur d'agence / collaborateur depuis N'IMPORTE QUEL ordinateur
+ * avec contrôle STRICT du mot de passe.
  */
 export async function authenticateCompanyUserAsync(
   loginInput: string,
@@ -425,6 +460,12 @@ export async function authenticateCompanyUserAsync(
   const localMatch = authenticateCompanyUser(loginInput, passwordInput);
   if (localMatch) return localMatch;
 
+  // Si l'identifiant existe déjà localement mais que authenticateCompanyUser a renvoyé null,
+  // cela signifie que le mot de passe saisi est FAUX : on refuse immédiatement la connexion !
+  if (isKnownLocalCompanyIdentifier(loginInput)) {
+    return null;
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!supabaseUrl || !supabaseUrl.startsWith("http")) return null;
 
@@ -432,6 +473,7 @@ export async function authenticateCompanyUserAsync(
     const cleanInput = loginInput.trim().toLowerCase();
     const digitsOnly = loginInput.replace(/\D/g, "");
     const inputPass = passwordInput.trim();
+    if (!inputPass) return null;
 
     const [profilesRes, companiesRes] = await Promise.all([
       supabase.from("profiles").select("*"),
@@ -441,26 +483,19 @@ export async function authenticateCompanyUserAsync(
     const profiles: any[] = Array.isArray(profilesRes.data) ? profilesRes.data : [];
     const companies: any[] = Array.isArray(companiesRes.data) ? companiesRes.data : [];
 
-    // 1. Vérifier dans profiles
+    // Vérifier dans profiles avec contrôle strict du mot de passe stocké dans permissions.password
     const matchedProfile = profiles.find((p: any) => {
       const pEmail = (p.email || "").trim().toLowerCase();
-      const pName = (p.full_name || "").trim().toLowerCase();
       const pPhone = String(p.phone || "").replace(/\D/g, "");
       const matchesId =
         (pEmail && cleanInput === pEmail) ||
-        (pName && cleanInput === pName) ||
-        (digitsOnly.length >= 6 && pPhone.length >= 6 && (pPhone.includes(digitsOnly) || digitsOnly.includes(pPhone)));
+        (digitsOnly.length >= 8 && pPhone.length >= 8 && pPhone === digitsOnly);
       if (!matchesId) return false;
 
-      const storedPass = p.permissions?.password || "Gest1234!";
-      return (
-        inputPass === storedPass ||
-        inputPass === "Admin1234!" ||
-        inputPass === "Gest1234!" ||
-        inputPass === "Gerant1234!" ||
-        inputPass.toLowerCase() === "admin" ||
-        inputPass === "123456"
-      );
+      const remotePass = p.permissions?.password ? String(p.permissions.password).trim() : "";
+      if (!remotePass) return false;
+
+      return inputPass === remotePass;
     });
 
     if (matchedProfile) {
@@ -488,38 +523,9 @@ export async function authenticateCompanyUserAsync(
         permissions: getDefaultPermissions(roleStr),
       };
     }
-
-    // 2. Vérifier dans companies
-    const matchedCompany = companies.find((c: any) => {
-      const cEmail = (c.email || "").trim().toLowerCase();
-      const cPhone = String(c.phone || "").replace(/\D/g, "");
-      return (
-        (cEmail && cleanInput === cEmail) ||
-        (digitsOnly.length >= 6 && cPhone.length >= 6 && (cPhone.includes(digitsOnly) || digitsOnly.includes(cPhone)))
-      );
-    });
-
-    if (matchedCompany) {
-      return {
-        id: matchedCompany.id,
-        companyId: matchedCompany.id,
-        companyName: matchedCompany.name,
-        name: matchedCompany.name,
-        email: matchedCompany.email || cleanInput,
-        phone: matchedCompany.phone || "",
-        login: matchedCompany.email || cleanInput,
-        password: inputPass,
-        role: "Administrateur",
-        status: "Actif",
-        dateAdded: "01 Janv 2026",
-        permissions: getDefaultPermissions("Administrateur"),
-      };
-    }
   } catch (e) {
     console.error("Erreur vérification Supabase utilisateur agence:", e);
   }
 
   return null;
 }
-
-
