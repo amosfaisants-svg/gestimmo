@@ -7,8 +7,8 @@ import { Lock, Mail, AlertCircle } from "lucide-react";
 import { authenticateLocataireAsync } from "@/lib/tenantCredentials";
 import { authenticateProprietaireAsync } from "@/lib/ownerCredentials";
 import { authenticateCompanyUserAsync } from "@/lib/companyCredentials";
-import { authenticateSuperAdmin, isAgencySuspendedForUser } from "@/lib/superAdminService";
-import { setPortalSession, getPortalSession } from "@/lib/authSession";
+import { authenticateSuperAdmin, isAgencySuspendedForUser, isSuperAdminMenuAllowedForAgency } from "@/lib/superAdminService";
+import { setPortalSession, getPortalSession, clearPortalSession } from "@/lib/authSession";
 import { invalidateDatabaseCache, loadAllDataFromDatabase } from "@/lib/dataService";
 
 export default function ConnexionPage() {
@@ -120,6 +120,9 @@ export default function ConnexionPage() {
         const roleKey = isGerant ? "GERANT" : companyUser.role?.toUpperCase() || "ADMIN";
 
         invalidateDatabaseCache();
+        if (!isSuperAdminMenuAllowedForAgency(companyUser.companyId, companyUser.email || companyUser.login)) {
+          clearPortalSession("SUPER_ADMIN");
+        }
         setPortalSession("ADMIN", { ...companyUser, userRole: roleKey });
         await loadAllDataFromDatabase(true);
         router.replace("/app");

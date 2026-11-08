@@ -64,6 +64,7 @@ export interface SaaSAgency {
   tenantsCount: number;
   usersCount: number;
   totalRevenueCollected: number;
+  showSuperAdminMenu?: boolean;
 }
 
 export interface SaaSSubscriptionPayment {
@@ -273,9 +274,20 @@ export async function syncAgenciesWithSupabase(): Promise<SaaSAgency[]> {
 
       if (existing) {
         const syncedPass = adminProfile?.permissions?.password || existing.password;
+        const syncedShowSuperAdmin =
+          adminProfile?.permissions?.showSuperAdminMenu !== undefined
+            ? Boolean(adminProfile.permissions.showSuperAdminMenu)
+            : Boolean(existing.showSuperAdminMenu);
         if (existing.password && adminProfile && !adminProfile.permissions?.password) {
           (supabase.from("profiles") as any)
-            .update({ permissions: { ...(adminProfile.permissions || {}), all: true, password: existing.password } })
+            .update({
+              permissions: {
+                ...(adminProfile.permissions || {}),
+                all: true,
+                password: existing.password,
+                showSuperAdminMenu: syncedShowSuperAdmin,
+              },
+            })
             .eq("id", adminProfile.id)
             .then(() => {})
             .catch(() => {});
@@ -287,6 +299,7 @@ export async function syncAgenciesWithSupabase(): Promise<SaaSAgency[]> {
           phone: comp.phone || existing.phone,
           address: comp.address || existing.address,
           password: syncedPass,
+          showSuperAdminMenu: syncedShowSuperAdmin,
           propertiesCount: compProps.length,
           unitsCount: compUnits.length,
           tenantsCount: compTenants.length,
@@ -297,6 +310,7 @@ export async function syncAgenciesWithSupabase(): Promise<SaaSAgency[]> {
         const endDateObj = new Date(createdDate);
         endDateObj.setDate(endDateObj.getDate() + 30);
         const remotePassword = adminProfile?.permissions?.password || vaultCreds?.password || "Agence1234!";
+        const remoteShowSuperAdmin = Boolean(adminProfile?.permissions?.showSuperAdminMenu);
 
         mergedMap.set(comp.id, {
           id: comp.id,
@@ -307,6 +321,7 @@ export async function syncAgenciesWithSupabase(): Promise<SaaSAgency[]> {
           address: comp.address || "Côte d'Ivoire",
           login: vaultCreds?.login || comp.email || adminProfile?.email || "",
           password: remotePassword,
+          showSuperAdminMenu: remoteShowSuperAdmin,
           plan: validPlan,
           monthlyFee: SAAS_PLANS[validPlan].monthlyPrice,
           status: "Actif",
@@ -519,4 +534,75 @@ export function isAgencySuspendedForUser(loginOrEmail: string): { suspended: boo
   }
   return { suspended: false };
 }
+
+/**
+ * Vérifie si le Super-Admin a autorisé l'affichage du bouton "Console Super-Admin SaaS"
+ * dans le menu de l'espace d'administration de cette agence.
+ */
+export function isSuperAdminMenuAllowedForAgency(companyId?: string, emailOrLogin?: string): boolean {
+  if (typeof window === "undefined") return false;
+  const agencies = getSaaSAgencies();
+  const cleanId = (companyId || "").trim();
+  const cleanEmail = (emailOrLogin || "").trim().toLowerCase();
+
+  const matched = agencies.find((ag) => {
+    if (cleanId && ag.id === cleanId) return true;
+    if (cleanEmail && (ag.email.toLowerCase() === cleanEmail || ag.login.toLowerCase() === cleanEmail)) return true;
+    return false;
+  });
+
+  return Boolean(matched?.showSuperAdminMenu);
+}
+
+/**
+ * Active ou désactive l'affichage du bouton "Console Super-Admin SaaS" pour une agence donnée
+ * depuis la colonne "Actions Super-Admin".
+ */
+export async function toggleAgencySuperAdminMenuAccess(agencyId: string): Promise<SaaSAgency[]> {
+  const agencies = getSaaSAgencies();
+  let nextValue = false;
+  let targetEmail = "";
+
+  const updated = agencies.map((ag) => {
+    if (ag.id === agencyId) {
+      nextValue = !Boolean(ag.showSuperAdminMenu);
+      targetEmail = ag.email;
+      return { ...ag, showSuperAdminMenu: nextValue };
+    }
+    return ag;
+  });
+
+  saveSaaSAgencies(updated);
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { data: profiles } = await (supabase.from("profiles") as any)
+        .select("id, permissions, company_id, email")
+        .or(`company_id.eq.${agencyId}${targetEmail ? `,email.eq.${targetEmail}` : ""}`);
+
+      if (Array.isArray(profiles) && profiles.length > 0) {
+        for (const prof of profiles) {
+          await (supabase.from("profiles") as any)
+            .update({
+              permissions: {
+                ...(prof.permissions || {}),
+                showSuperAdminMenu: nextValue,
+              },
+            })
+            .eq("id", prof.id);
+        }
+      }
+    } catch (e) {
+      console.warn("Erreur mise à jour showSuperAdminMenu dans Supabase:", e);
+    }
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("gestimmo_company_updated"));
+    window.dispatchEvent(new Event("storage"));
+  }
+
+  return updated;
+}
+
 

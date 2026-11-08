@@ -41,6 +41,7 @@ import {
   saveSaaSPayments,
   getSuperAdminCredentials,
   saveSuperAdminCredentials,
+  toggleAgencySuperAdminMenuAccess,
 } from "@/lib/superAdminService";
 import { setPortalSession, clearPortalSession } from "@/lib/authSession";
 import { getDefaultPermissions } from "@/lib/companyCredentials";
@@ -211,6 +212,11 @@ export default function SuperAdminPage() {
     const updated = agencies.filter((a) => a.id !== agency.id);
     setAgencies(updated);
     saveSaaSAgencies(updated);
+  };
+
+  const handleToggleSuperAdminMenu = async (agency: SaaSAgency) => {
+    const updated = await toggleAgencySuperAdminMenuAccess(agency.id);
+    setAgencies(updated);
   };
 
   const handleImpersonateAgency = (agency: SaaSAgency) => {
@@ -680,6 +686,28 @@ export default function SuperAdminPage() {
 
                         <td className="px-6 py-4 whitespace-nowrap text-right">
                           <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSuperAdminMenu(agency)}
+                              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors inline-flex items-center gap-1 cursor-pointer border ${
+                                agency.showSuperAdminMenu
+                                  ? "bg-gray-900 text-white border-gray-900 hover:bg-gray-800 shadow-sm"
+                                  : "bg-white text-gray-600 border-app-border hover:bg-gray-50"
+                              }`}
+                              title={
+                                agency.showSuperAdminMenu
+                                  ? "Masquer le bouton 'Console Super-Admin SaaS' dans le menu de cette agence"
+                                  : "Autoriser l'affichage du bouton 'Console Super-Admin SaaS' dans le menu de cette agence"
+                              }
+                            >
+                              <ShieldCheck
+                                className={`h-3.5 w-3.5 ${
+                                  agency.showSuperAdminMenu ? "text-primary" : "text-gray-400"
+                                }`}
+                              />
+                              <span>{agency.showSuperAdminMenu ? "Super-Admin : Oui" : "Super-Admin : Non"}</span>
+                            </button>
+
                             <button
                               type="button"
                               onClick={() => handleImpersonateAgency(agency)}

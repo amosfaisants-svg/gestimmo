@@ -40,8 +40,9 @@ const allNavItems = [
   { name: "Paramètres", href: "/app/parametres", icon: Settings, moduleKey: "parametres" as const, adminOnly: true },
 ];
 
-import { clearPortalSession, getPortalSession } from "@/lib/authSession";
+import { clearPortalSession, getPortalSession, getActiveCompanyId, setPortalSession } from "@/lib/authSession";
 import { getStoredCompanyInfo } from "@/lib/companyInfo";
+import { isSuperAdminMenuAllowedForAgency, getSuperAdminCredentials } from "@/lib/superAdminService";
 import { ShieldCheck } from "lucide-react";
 
 export function Sidebar() {
@@ -82,7 +83,12 @@ export function Sidebar() {
       try {
         const info = getStoredCompanyInfo();
         setCompanyInfo(info);
-        setIsSuperAdminSession(Boolean(getPortalSession("SUPER_ADMIN")));
+        const activeCompId = (currentUser as any)?.companyId || getActiveCompanyId();
+        const allowed = isSuperAdminMenuAllowedForAgency(
+          activeCompId,
+          currentUser?.email || currentUser?.login
+        );
+        setIsSuperAdminSession(allowed);
       } catch (e) { }
     };
 
@@ -92,6 +98,7 @@ export function Sidebar() {
     window.addEventListener("storage", updateCount);
     window.addEventListener("storage", updateCompany);
     window.addEventListener("gestimmo_company_updated", updateCompany as any);
+    window.addEventListener("gestimmo_saas_agencies_updated", updateCompany as any);
     window.addEventListener("gestimmo_messages_updated", updateCount);
     window.addEventListener("gestimmo_notifications_updated", updateCount);
 
@@ -99,10 +106,11 @@ export function Sidebar() {
       window.removeEventListener("storage", updateCount);
       window.removeEventListener("storage", updateCompany);
       window.removeEventListener("gestimmo_company_updated", updateCompany as any);
+      window.removeEventListener("gestimmo_saas_agencies_updated", updateCompany as any);
       window.removeEventListener("gestimmo_messages_updated", updateCount);
       window.removeEventListener("gestimmo_notifications_updated", updateCount);
     };
-  }, []);
+  }, [currentUser]);
 
   // Filter nav items based on user permissions & gerant status
   const navItems = allNavItems
@@ -209,6 +217,11 @@ export function Sidebar() {
           {isSuperAdminSession && (
             <Link
               href="/super-admin"
+              onClick={() => {
+                if (!getPortalSession("SUPER_ADMIN")) {
+                  setPortalSession("SUPER_ADMIN", getSuperAdminCredentials(), "SUPER_ADMIN");
+                }
+              }}
               className="w-full flex items-center justify-center px-3 py-2 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-800 rounded-xl transition-colors shadow-sm"
             >
               <ShieldCheck className="w-4 h-4 mr-1.5 text-primary" /> Console Super-Admin SaaS
