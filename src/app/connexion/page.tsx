@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Lock, Mail, AlertCircle } from "lucide-react";
+import { Lock, Mail, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { authenticateLocataireAsync } from "@/lib/tenantCredentials";
 import { authenticateProprietaireAsync } from "@/lib/ownerCredentials";
 import { authenticateCompanyUserAsync } from "@/lib/companyCredentials";
@@ -15,6 +15,7 @@ export default function ConnexionPage() {
   const router = useRouter();
   const [loginInput, setLoginInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -172,13 +173,15 @@ export default function ConnexionPage() {
                   id="email"
                   name="email"
                   type="text"
+                  data-no-upper="true"
+                  autoComplete="username"
                   required
-                  className="appearance-none block w-full px-3 py-2.5 pl-10 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm transition-colors"
+                  className="appearance-none block w-full px-3 py-2.5 pl-10 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm transition-colors normal-case"
                   placeholder="Votre adresse email ou téléphone"
                   value={loginInput}
                   onChange={(e) => setLoginInput(e.target.value)}
                 />
-                <Mail className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Mail className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
@@ -190,14 +193,25 @@ export default function ConnexionPage() {
                 <input
                   id="password"
                   name="password"
-                  type="password"
+                  type={showPassword ? "text" : "password"}
+                  data-no-upper="true"
+                  autoComplete="current-password"
                   required
-                  className="appearance-none block w-full px-3 py-2.5 pl-10 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm transition-colors"
+                  className="appearance-none block w-full px-3 py-2.5 pl-10 pr-10 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm transition-colors normal-case"
                   placeholder="••••••••"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
                 />
-                <Lock className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Lock className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors p-1 cursor-pointer"
+                  title={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                  aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 

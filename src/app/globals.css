@@ -7,9 +7,14 @@
     @apply bg-app-bg text-gray-900 antialiased;
   }
 
-  /* ─── Saisies en majuscules (affichage) ─────────────────────────────────── */
-  input:not([type="email"]):not([type="password"]):not([type="number"]):not([type="date"]):not([type="month"]):not([type="time"]):not([type="datetime-local"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([data-no-upper="true"]),
+  /* ─── Saisies en majuscules (affichage) sauf emails, mots de passe et champs exclus ─── */
+  input:not([type="email"]):not([type="password"]):not([type="tel"]):not([type="number"]):not([type="date"]):not([type="month"]):not([type="time"]):not([type="datetime-local"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([data-no-upper="true"]),
   textarea:not([data-no-upper="true"]) {
     text-transform: uppercase;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    text-transform: none;
   }
 }

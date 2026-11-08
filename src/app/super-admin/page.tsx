@@ -908,11 +908,12 @@ export default function SuperAdminPage() {
                   <input
                     type="text"
                     required
+                    data-no-upper="true"
                     value={adminCreds.login}
                     onChange={(e) =>
                       setAdminCreds({ ...adminCreds, login: e.target.value, email: e.target.value })
                     }
-                    className="w-full px-3.5 py-2.5 border border-app-border rounded-xl text-sm focus:outline-none focus:border-primary"
+                    className="w-full px-3.5 py-2.5 border border-app-border rounded-xl text-sm focus:outline-none focus:border-primary normal-case"
                   />
                 </div>
 
@@ -933,9 +934,10 @@ export default function SuperAdminPage() {
                   <input
                     type={showAdminPass ? "text" : "password"}
                     required
+                    data-no-upper="true"
                     value={adminCreds.password}
                     onChange={(e) => setAdminCreds({ ...adminCreds, password: e.target.value })}
-                    className="w-full px-3.5 py-2.5 pr-10 border border-app-border rounded-xl text-sm focus:outline-none focus:border-primary"
+                    className="w-full px-3.5 py-2.5 pr-10 border border-app-border rounded-xl text-sm focus:outline-none focus:border-primary normal-case"
                   />
                   <button
                     type="button"
@@ -1031,10 +1033,11 @@ export default function SuperAdminPage() {
                   <input
                     type="text"
                     required
+                    data-no-upper="true"
                     placeholder="Ex: Agence2026!"
                     value={newAgencyForm.password}
                     onChange={(e) => setNewAgencyForm({ ...newAgencyForm, password: e.target.value })}
-                    className="w-full px-3 py-2 border border-app-border rounded-lg text-sm"
+                    className="w-full px-3 py-2 border border-app-border rounded-lg text-sm normal-case"
                   />
                 </div>
               </div>

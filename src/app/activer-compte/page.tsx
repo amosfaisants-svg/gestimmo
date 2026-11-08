@@ -3,13 +3,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { UserCheck, Lock, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { UserCheck, Lock, CheckCircle2, AlertCircle, Loader2, Eye, EyeOff } from "lucide-react";
 import { setPortalSession } from "@/lib/authSession";
 
 export default function ActiverComptePage() {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -102,13 +104,22 @@ export default function ActiverComptePage() {
                   <input
                     id="password"
                     name="password"
-                    type="password"
+                    type={showPassword ? "text" : "password"}
+                    data-no-upper="true"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     placeholder="Minimum 6 caractères"
-                    className="appearance-none block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-gray-900"
+                    className="appearance-none block w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-gray-900 normal-case"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors p-1 cursor-pointer"
+                    title={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
               </div>
 
@@ -121,13 +132,22 @@ export default function ActiverComptePage() {
                   <input
                     id="password-confirm"
                     name="password-confirm"
-                    type="password"
+                    type={showPasswordConfirm ? "text" : "password"}
+                    data-no-upper="true"
                     value={passwordConfirm}
                     onChange={(e) => setPasswordConfirm(e.target.value)}
                     required
                     placeholder="Répétez le mot de passe"
-                    className="appearance-none block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-gray-900"
+                    className="appearance-none block w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-gray-900 normal-case"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordConfirm((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors p-1 cursor-pointer"
+                    title={showPasswordConfirm ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                  >
+                    {showPasswordConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
               </div>
 
