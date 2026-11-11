@@ -15,14 +15,27 @@ export interface ReceiptQrInput {
 
 const formatAmountFCFA = (amount: number | string | undefined): string => {
   if (amount === undefined || amount === null || amount === "") return "0 F CFA";
+  let formatted = "";
   if (typeof amount === "string") {
     const cleaned = Number(amount.replace(/[^0-9.-]+/g, ""));
     if (!isNaN(cleaned) && cleaned > 0) {
-      return `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(cleaned)} F CFA`;
+      formatted = `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(cleaned)} F CFA`;
+    } else {
+      formatted = amount.includes("CFA") ? amount : `${amount} F CFA`;
     }
-    return amount.includes("CFA") ? amount : `${amount} F CFA`;
+  } else {
+    formatted = `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(amount)} F CFA`;
   }
-  return `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(amount)} F CFA`;
+  return formatted.replace(/[\u202f\u00a0]/g, " ");
+};
+
+const toCleanAscii = (str: string): string => {
+  return (str || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u202f\u00a0]/g, " ")
+    .replace(/[^\x20-\x7E\n]/g, "")
+    .trim();
 };
 
 export interface ResolvedApartmentInfo {
@@ -41,47 +54,56 @@ export function resolveApartmentCharacteristics(input: ReceiptQrInput): Resolved
   let unitType = input.unitType || p.unitType || p.typeLogement || "";
   let propertyName = input.property || p.property || p.bien || "";
   let extraDetails = "";
+  let resolvedUnitTarget: any = rawUnit;
 
   if (typeof window !== "undefined") {
     try {
+      const normTenant = String(input.tenantName || p.tenant || p.locataire || "").trim().toLowerCase();
+      const normUnit = String(rawUnit).trim().toLowerCase();
+
       const storedLogements = localStorage.getItem("gestimmo_logements");
       if (storedLogements) {
         const logements: any[] = JSON.parse(storedLogements);
-        const normUnit = String(rawUnit).trim().toLowerCase();
-        const foundUnit = logements.find(
+        let foundUnit = logements.find(
           (l: any) =>
-            (l.id && String(l.id).trim().toLowerCase() === normUnit) ||
-            (l.unit && String(l.unit).trim().toLowerCase() === normUnit) ||
-            (l.name && String(l.name).trim().toLowerCase() === normUnit) ||
-            (l.unit_number && String(l.unit_number).trim().toLowerCase() === normUnit)
+            normUnit &&
+            ((l.id && String(l.id).trim().toLowerCase() === normUnit) ||
+              (l.unit && String(l.unit).trim().toLowerCase() === normUnit) ||
+              (l.name && String(l.name).trim().toLowerCase() === normUnit) ||
+              (l.unit_number && String(l.unit_number).trim().toLowerCase() === normUnit))
         );
+        if (!foundUnit && normTenant) {
+          foundUnit = logements.find(
+            (l: any) => l.tenant && String(l.tenant).trim().toLowerCase() === normTenant
+          );
+        }
         if (foundUnit) {
+          resolvedUnitTarget = foundUnit;
           if (!unitType && foundUnit.type) unitType = foundUnit.type;
           if (!propertyName && (foundUnit.property || foundUnit.bien)) {
             propertyName = foundUnit.property || foundUnit.bien;
           }
           const parts: string[] = [];
-          if (foundUnit.rooms || foundUnit.pieces) parts.push(`${foundUnit.rooms || foundUnit.pieces} pièce(s)`);
-          if (foundUnit.surface) parts.push(`${foundUnit.surface} m²`);
-          if (foundUnit.floor || foundUnit.etage) parts.push(`Étage ${foundUnit.floor || foundUnit.etage}`);
+          if (foundUnit.rooms || foundUnit.pieces) parts.push(`${foundUnit.rooms || foundUnit.pieces} piece(s)`);
+          if (foundUnit.surface) parts.push(`${foundUnit.surface} m2`);
+          if (foundUnit.floor || foundUnit.etage) parts.push(`Etage ${foundUnit.floor || foundUnit.etage}`);
           if (parts.length > 0) extraDetails = parts.join(", ");
         }
       }
 
-      if (!propertyName) {
-        const storedBaux = localStorage.getItem("gestimmo_baux");
-        if (storedBaux) {
-          const baux: any[] = JSON.parse(storedBaux);
-          const normTenant = String(input.tenantName || p.tenant || "").trim().toLowerCase();
-          const normUnit = String(rawUnit).trim().toLowerCase();
-          const foundLease = baux.find(
-            (b: any) =>
-              (normUnit && b.unit && String(b.unit).trim().toLowerCase() === normUnit) ||
-              (normTenant && b.tenant && String(b.tenant).trim().toLowerCase() === normTenant)
-          );
-          if (foundLease) {
-            if (!propertyName && foundLease.property) propertyName = foundLease.property;
-            if (!unitType && foundLease.unitType) unitType = foundLease.unitType;
+      const storedBaux = localStorage.getItem("gestimmo_baux");
+      if (storedBaux) {
+        const baux: any[] = JSON.parse(storedBaux);
+        const foundLease = baux.find(
+          (b: any) =>
+            (normTenant && b.tenant && String(b.tenant).trim().toLowerCase() === normTenant) ||
+            (normUnit && b.unit && String(b.unit).trim().toLowerCase() === normUnit)
+        );
+        if (foundLease) {
+          if (!propertyName && foundLease.property) propertyName = foundLease.property;
+          if (!unitType && foundLease.unitType) unitType = foundLease.unitType;
+          if (typeof resolvedUnitTarget === "string" && foundLease.unit) {
+            resolvedUnitTarget = foundLease.unit;
           }
         }
       }
@@ -90,7 +112,9 @@ export function resolveApartmentCharacteristics(input: ReceiptQrInput): Resolved
     }
   }
 
-  const formattedUnit = rawUnit ? formatUnitDisplay(rawUnit, 1, unitType || "Appartement") : "Logement";
+  const formattedUnit = resolvedUnitTarget
+    ? formatUnitDisplay(resolvedUnitTarget, 1, unitType || "Appartement")
+    : "Logement";
   const unitLower = formattedUnit.toLowerCase();
   const typeLower = (unitType || "").trim().toLowerCase();
 
@@ -109,7 +133,7 @@ export function resolveApartmentCharacteristics(input: ReceiptQrInput): Resolved
   }
 
   if (extraDetails) {
-    unitDesc += ` [${extraDetails}]`;
+    unitDesc += ` (${extraDetails})`;
   }
 
   const cleanProp = propertyName && propertyName !== "-" && propertyName !== "Inconnu" ? propertyName : "";
@@ -127,27 +151,33 @@ export function resolveApartmentCharacteristics(input: ReceiptQrInput): Resolved
  */
 export function buildReceiptQrPayload(input: ReceiptQrInput): string {
   const p = input.paymentObj || {};
-  const receiptNo =
-    input.receiptNumber ||
-    p.receiptNumber ||
-    p.receipt_number ||
-    (p.id || p.code ? getPaymentDisplayCode(p) : "REC-OFFICIEL");
-  const tenant = (input.tenantName || p.tenant || p.locataire || "Locataire").toString().trim();
-  const period = (input.period || p.period || p.periode || p.period_month || "-").toString().trim();
+  const receiptNo = toCleanAscii(
+    String(
+      input.receiptNumber ||
+        p.receiptNumber ||
+        p.receipt_number ||
+        (p.id || p.code ? getPaymentDisplayCode(p) : "REC-OFFICIEL")
+    )
+  );
+  const tenant = toCleanAscii(String(input.tenantName || p.tenant || p.locataire || "Locataire"));
+  const period = toCleanAscii(String(input.period || p.period || p.periode || p.period_month || "-"));
   const aptInfo = resolveApartmentCharacteristics(input);
-  const amountStr = formatAmountFCFA(input.amount !== undefined ? input.amount : (p.amount ?? p.montant ?? 0));
-  const dateStr = (input.paymentDate || p.date || p.payment_date || new Date().toLocaleDateString("fr-FR"))
-    .toString()
-    .trim();
+  const aptLabel = toCleanAscii(aptInfo.fullLabel);
+  const amountStr = toCleanAscii(
+    formatAmountFCFA(input.amount !== undefined ? input.amount : (p.amount ?? p.montant ?? 0))
+  );
+  const dateStr = toCleanAscii(
+    String(input.paymentDate || p.date || p.payment_date || new Date().toLocaleDateString("fr-FR"))
+  );
 
   return [
-    "QUITTANCE DE LOYER CERTIFIEE",
-    `N° Quittance : ${receiptNo}`,
+    "QUITTANCE DE LOYER",
+    `Quittance : ${receiptNo}`,
     `Locataire : ${tenant}`,
     `Periode : ${period}`,
-    `Appartement : ${aptInfo.fullLabel}`,
-    `Montant paye : ${amountStr}`,
-    `Date de paiement : ${dateStr}`,
+    `Appartement : ${aptLabel}`,
+    `Montant : ${amountStr}`,
+    `Date : ${dateStr}`,
   ].join("\n");
 }
 
@@ -155,26 +185,28 @@ export function buildReceiptQrPayload(input: ReceiptQrInput): string {
  * Génère de manière 100% synchrone une image Data URL (PNG sur navigateur, SVG en fallback)
  * représentant le QR code de la quittance, compatible avec html2pdf.js et window.print().
  */
-export function generateReceiptQrDataUrl(input: ReceiptQrInput, pixelSize: number = 140): string {
+export function generateReceiptQrDataUrl(input: ReceiptQrInput, pixelSize: number = 240): string {
   const text = buildReceiptQrPayload(input);
   try {
-    const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
+    const qr = QRCode.create(text, { errorCorrectionLevel: "L" });
     const modules = qr.modules;
     const moduleCount = modules.size;
-    const margin = 2;
+    // Quiet zone de 4 modules obligatoire (norme ISO/IEC 18004) pour lecture instantanée sur smartphone
+    const margin = 4;
     const totalModules = moduleCount + margin * 2;
 
     if (typeof document !== "undefined") {
       const canvas = document.createElement("canvas");
-      const scale = Math.max(3, Math.floor(pixelSize / totalModules));
+      const scale = Math.max(8, Math.ceil(pixelSize / totalModules));
       const canvasSize = totalModules * scale;
       canvas.width = canvasSize;
       canvas.height = canvasSize;
       const ctx = canvas.getContext("2d");
       if (ctx) {
+        ctx.imageSmoothingEnabled = false;
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, canvasSize, canvasSize);
-        ctx.fillStyle = "#0F172A";
+        ctx.fillStyle = "#000000";
         for (let r = 0; r < moduleCount; r++) {
           for (let c = 0; c < moduleCount; c++) {
             if (modules.get(r, c)) {
@@ -195,7 +227,7 @@ export function generateReceiptQrDataUrl(input: ReceiptQrInput, pixelSize: numbe
         }
       }
     }
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalModules} ${totalModules}" width="${pixelSize}" height="${pixelSize}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#FFFFFF"/><path d="${path}" fill="#0F172A"/></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalModules} ${totalModules}" width="${pixelSize}" height="${pixelSize}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#FFFFFF"/><path d="${path}" fill="#000000"/></svg>`;
     return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   } catch (err) {
     console.error("Erreur génération QR code:", err);

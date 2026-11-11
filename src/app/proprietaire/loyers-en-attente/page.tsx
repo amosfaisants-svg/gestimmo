@@ -675,7 +675,7 @@ export default function LoyersEnAttentePage() {
           amount: previewQuittanceItem.amount,
           paymentDate: previewQuittanceItem.date,
           paymentObj: previewQuittanceItem.rawPayment || previewQuittanceItem,
-        }, 160);
+        }, 300);
 
         const handleDownloadPdf = async () => {
           setIsDownloadingQuittance(true);
@@ -686,8 +686,8 @@ export default function LoyersEnAttentePage() {
             const opt: any = {
               margin: 10,
               filename: `Quittance_${receiptCode}_${(previewQuittanceItem.tenant || "Locataire").replace(/\s+/g, "_")}.pdf`,
-              image: { type: "jpeg", quality: 0.98 },
-              html2canvas: { scale: 2, useCORS: true },
+              image: { type: "png", quality: 1 },
+              html2canvas: { scale: 3, useCORS: true },
               jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
             };
             await html2pdf().set(opt).from(element).save();
@@ -776,7 +776,7 @@ export default function LoyersEnAttentePage() {
                   </div>
                   {qrDataUrl && (
                     <div className="flex flex-col items-center bg-white p-2 rounded-xl border border-gray-200 shadow-sm shrink-0 self-end sm:self-auto">
-                      <img src={qrDataUrl} alt={`QR Code ${receiptCode}`} className="w-24 h-24 object-contain" />
+                      <img src={qrDataUrl} alt={`QR Code ${receiptCode}`} className="w-32 h-32 object-contain [image-rendering:pixelated]" />
                       <span className="text-[9px] font-mono text-gray-500 mt-1">{receiptCode}</span>
                     </div>
                   )}

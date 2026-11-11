@@ -1814,7 +1814,7 @@ export default function RapportsPage() {
               </div>
               <p class="text-[7.5px] text-primary/80 font-bold mt-0.5 leading-none">« Bon Pour Acquit »</p>
             </div>
-            ${qrDataUrl ? `<div class="border border-gray-300 rounded bg-white p-0.5 flex flex-col items-center shrink-0"><img src="${qrDataUrl}" alt="QR Code" style="width: 36px; height: 36px; object-fit: contain; display: block;" /></div>` : ''}
+            ${qrDataUrl ? `<div class="border border-gray-300 rounded bg-white p-0.5 flex flex-col items-center shrink-0"><img src="${qrDataUrl}" alt="QR Code" style="width: 52px; height: 52px; object-fit: contain; display: block; image-rendering: pixelated; image-rendering: crisp-edges;" /></div>` : ''}
           </div>
         </div>
 

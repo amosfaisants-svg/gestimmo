@@ -243,11 +243,17 @@ export default function ProprietaireRelevesPage() {
 
           return selected.map((p: any, idx: number) => {
             const pUnitRaw = p.unitId || p.unit_id || p.unit;
-            const foundLogement = myLogements.find((l: any) =>
+            const pTenantNorm = String(p.tenant || p.locataire || "").trim().toLowerCase();
+            let foundLogement = myLogements.find((l: any) =>
               (l.id && pUnitRaw && String(l.id).toLowerCase() === String(pUnitRaw).toLowerCase()) ||
               (l.unit && p.unit && String(l.unit).toLowerCase() === String(p.unit).toLowerCase()) ||
               (l.name && p.unit && String(l.name).toLowerCase() === String(p.unit).toLowerCase())
             );
+            if (!foundLogement && pTenantNorm) {
+              foundLogement = myLogements.find((l: any) =>
+                l.tenant && String(l.tenant).trim().toLowerCase() === pTenantNorm
+              );
+            }
 
             let unitName = "";
             if (foundLogement) {
@@ -271,7 +277,7 @@ export default function ProprietaireRelevesPage() {
               id: p.id || `PAY-${idx + 1}`,
               code: getPaymentDisplayCode(p),
               unit: unitName,
-              rawUnit: pUnitRaw || unitName,
+              rawUnit: unitName,
               property: propName,
               tenant: tenantName,
               type: displayType,
@@ -414,7 +420,7 @@ export default function ProprietaireRelevesPage() {
           amount: item.amount,
           paymentDate: item.date || payout.date,
           paymentObj: item.rawPayment || item,
-        }, 90);
+        }, 300);
 
         return `
           <tr style="border-bottom: 1px solid #e2e8f0;">
@@ -431,8 +437,8 @@ export default function ProprietaireRelevesPage() {
             </td>
             <td style="padding: 10px 12px; color: #475569; font-size: 13px;">${item.period}</td>
             <td style="padding: 10px 12px; text-align: right; font-weight: 700; color: #0f172a; font-size: 13px;">${formatFCFA(item.amount)}</td>
-            <td style="padding: 6px 10px; text-align: center;">
-              ${rowQrUrl ? `<img src="${rowQrUrl}" alt="QR ${receiptCode}" style="width: 44px; height: 44px; display: inline-block;" />` : '-'}
+            <td style="padding: 6px 8px; text-align: center; background: #ffffff;">
+              ${rowQrUrl ? `<img src="${rowQrUrl}" alt="QR ${receiptCode}" style="width: 82px; height: 82px; display: inline-block; image-rendering: pixelated; image-rendering: crisp-edges;" />` : '-'}
             </td>
           </tr>
         `;
@@ -552,8 +558,8 @@ export default function ProprietaireRelevesPage() {
       const options: any = {
         margin: 8,
         filename: `Releve_Gerance_${cleanFilenameOwner}_${cleanFilenamePeriod}.pdf`,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
+        image: { type: "png", quality: 1 },
+        html2canvas: { scale: 3, useCORS: true },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
       };
 
@@ -591,7 +597,7 @@ export default function ProprietaireRelevesPage() {
         amount: item.amount,
         paymentDate: item.date,
         paymentObj: item.rawPayment || item,
-      }, 150);
+      }, 300);
 
       const element = document.createElement("div");
       element.innerHTML = `
@@ -662,8 +668,8 @@ export default function ProprietaireRelevesPage() {
               <p style="font-size: 11px; color: #94a3b8; margin: 4px 0 0 0;">Scannez le QR code pour vérifier les informations de la quittance</p>
             </div>
             ${qrDataUrl ? `
-              <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; background: #ffffff; text-align: center;">
-                <img src="${qrDataUrl}" alt="QR Code Quittance" style="width: 90px; height: 90px; display: block; margin: 0 auto;" />
+              <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 6px; background: #ffffff; text-align: center;">
+                <img src="${qrDataUrl}" alt="QR Code Quittance" style="width: 120px; height: 120px; display: block; margin: 0 auto; image-rendering: pixelated; image-rendering: crisp-edges;" />
                 <span style="display: block; font-size: 9px; font-family: monospace; color: #64748b; margin-top: 4px;">${receiptCode}</span>
               </div>
             ` : ''}
@@ -674,8 +680,8 @@ export default function ProprietaireRelevesPage() {
       const opt: any = {
         margin: 8,
         filename: `Quittance_${receiptCode}_${(item.tenant || "Locataire").replace(/\s+/g, "_")}.pdf`,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
+        image: { type: "png", quality: 1 },
+        html2canvas: { scale: 3, useCORS: true },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
       };
 
@@ -848,15 +854,15 @@ export default function ProprietaireRelevesPage() {
 
                 <div className="border border-app-border rounded-xl overflow-hidden shadow-sm bg-white">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse min-w-[540px]">
+                    <table className="w-full text-left text-xs border-collapse min-w-[560px]">
                       <thead>
                         <tr className="bg-gray-100/80 text-gray-600 font-semibold border-b border-app-border">
-                          <th className="py-2.5 px-3">Appartement</th>
+                          <th className="py-2.5 px-3">Appartement & Quittance</th>
                           <th className="py-2.5 px-3">Locataire</th>
-                          <th className="py-2.5 px-3">Objet du paiement</th>
-                          <th className="py-2.5 px-3">Période concernée</th>
+                          <th className="py-2.5 px-3">Objet</th>
+                          <th className="py-2.5 px-3">Période</th>
                           <th className="py-2.5 px-3 text-right">Montant</th>
-                          <th className="py-2.5 px-3 text-right">Quittance</th>
+                          <th className="py-2.5 px-3 text-center">QR Code & Quittance</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
@@ -869,12 +875,34 @@ export default function ProprietaireRelevesPage() {
                               : isAvance 
                               ? "bg-amber-50 text-amber-700 border-amber-200" 
                               : "bg-blue-50 text-blue-700 border-blue-200";
+                            const receiptCode = item.code || (item.id ? `REC-${String(item.id).slice(0, 8).toUpperCase()}` : `REC-00${idx + 1}`);
+                            const aptInfo = resolveApartmentCharacteristics({
+                              receiptNumber: receiptCode,
+                              tenantName: item.tenant,
+                              period: item.period,
+                              unit: item.rawUnit || item.unit,
+                              property: item.property,
+                              amount: item.amount,
+                              paymentDate: item.date || selectedPayoutDetails.date,
+                              paymentObj: item.rawPayment || item,
+                            });
+                            const rowQrUrl = generateReceiptQrDataUrl({
+                              receiptNumber: receiptCode,
+                              tenantName: item.tenant,
+                              period: item.period,
+                              unit: item.rawUnit || item.unit,
+                              property: aptInfo.property || item.property,
+                              amount: item.amount,
+                              paymentDate: item.date || selectedPayoutDetails.date,
+                              paymentObj: item.rawPayment || item,
+                            }, 280);
 
                             return (
                               <tr key={idx} className="hover:bg-gray-50/60 transition-colors">
                                 <td className="py-3 px-3 font-semibold text-gray-900">
-                                  {item.unit}
-                                  {item.property && <span className="block text-[11px] font-normal text-gray-500">{item.property}</span>}
+                                  {aptInfo.characteristics || item.unit}
+                                  {(aptInfo.property || item.property) && <span className="block text-[11px] font-normal text-gray-500">{aptInfo.property || item.property}</span>}
+                                  <span className="block text-[10px] font-mono text-primary mt-0.5">Quittance N° {receiptCode}</span>
                                 </td>
                                 <td className="py-3 px-3 text-gray-700 font-medium">
                                   {item.tenant}
@@ -890,14 +918,28 @@ export default function ProprietaireRelevesPage() {
                                 <td className="py-3 px-3 text-right font-bold text-gray-900 whitespace-nowrap">
                                   {formatFCFA(item.amount)}
                                 </td>
-                                <td className="py-3 px-3 text-right whitespace-nowrap">
-                                  <button
-                                    onClick={() => setPreviewQuittanceItem(item)}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-primary/40 text-primary hover:bg-primary hover:text-white text-[11px] font-semibold transition-colors cursor-pointer"
-                                    title="Afficher la quittance et le QR Code"
-                                  >
-                                    <QrCode className="w-3.5 h-3.5" /> Quittance
-                                  </button>
+                                <td className="py-2 px-3 text-center whitespace-nowrap">
+                                  <div className="flex flex-col items-center gap-1.5">
+                                    {rowQrUrl && (
+                                      <button
+                                        onClick={() => setPreviewQuittanceItem(item)}
+                                        className="bg-white p-1 rounded-lg border border-gray-200 hover:border-primary transition-colors cursor-pointer shadow-xs"
+                                        title="Cliquez pour agrandir la quittance"
+                                      >
+                                        <img
+                                          src={rowQrUrl}
+                                          alt={`QR ${receiptCode}`}
+                                          className="w-20 h-20 object-contain [image-rendering:pixelated]"
+                                        />
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => setPreviewQuittanceItem(item)}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-primary/40 text-primary hover:bg-primary hover:text-white text-[10px] font-semibold transition-colors cursor-pointer"
+                                    >
+                                      <QrCode className="w-3 h-3" /> Quittance
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -1096,7 +1138,7 @@ export default function ProprietaireRelevesPage() {
                   </div>
                   {qrDataUrl && (
                     <div className="flex flex-col items-center bg-white p-2 rounded-xl border border-gray-200 shadow-sm shrink-0 self-end sm:self-auto">
-                      <img src={qrDataUrl} alt={`QR Code ${receiptCode}`} className="w-24 h-24 object-contain" />
+                      <img src={qrDataUrl} alt={`QR Code ${receiptCode}`} className="w-32 h-32 object-contain [image-rendering:pixelated]" />
                       <span className="text-[9px] font-mono text-gray-500 mt-1">{receiptCode}</span>
                     </div>
                   )}

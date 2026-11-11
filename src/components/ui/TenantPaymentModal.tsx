@@ -354,8 +354,8 @@ export function TenantPaymentModal({
               <p style="margin: 4px 0 0 0; font-weight: 600;">Authentification Sécurisée Mobile Money CI • Scannez le QR code pour vérifier</p>
             </div>
             ${qrDataUrl ? `
-              <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; background: #ffffff; text-align: center;">
-                <img src="${qrDataUrl}" alt="QR Code Quittance" style="width: 90px; height: 90px; display: block; margin: 0 auto;" />
+              <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 6px; background: #ffffff; text-align: center;">
+                <img src="${qrDataUrl}" alt="QR Code Quittance" style="width: 120px; height: 120px; display: block; margin: 0 auto; image-rendering: pixelated; image-rendering: crisp-edges;" />
                 <span style="display: block; font-size: 9px; font-family: monospace; color: #64748b; margin-top: 4px;">${receiptCode}</span>
               </div>
             ` : ''}
@@ -366,8 +366,8 @@ export function TenantPaymentModal({
       const opt: any = {
         margin: 10,
         filename: `Quittance_${period.replace(/\s+/g, "_")}_${tenantName.replace(/\s+/g, "_")}.pdf`,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
+        image: { type: "png", quality: 1 },
+        html2canvas: { scale: 3, useCORS: true },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
       };
 
@@ -652,7 +652,7 @@ export function TenantPaymentModal({
                   }, 120);
                   return qrUrl ? (
                     <div className="bg-white p-1.5 rounded-xl border border-emerald-200 shadow-xs shrink-0">
-                      <img src={qrUrl} alt="QR Code Quittance" className="w-20 h-20 object-contain" />
+                      <img src={qrUrl} alt="QR Code Quittance" className="w-28 h-28 object-contain [image-rendering:pixelated]" />
                     </div>
                   ) : null;
                 })()}

@@ -328,8 +328,8 @@ export default function LocataireQuittancesPage() {
               <p style="font-size: 11px; color: #94a3b8; margin: 4px 0 0 0;">Généré automatiquement le ${new Date().toLocaleDateString('fr-FR')} • Scannez le QR code pour vérifier la quittance</p>
             </div>
             ${qrDataUrl ? `
-              <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; background: #ffffff; text-align: center;">
-                <img src="${qrDataUrl}" alt="QR Code Quittance" style="width: 90px; height: 90px; display: block; margin: 0 auto;" />
+              <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 6px; background: #ffffff; text-align: center;">
+                <img src="${qrDataUrl}" alt="QR Code Quittance" style="width: 120px; height: 120px; display: block; margin: 0 auto; image-rendering: pixelated; image-rendering: crisp-edges;" />
                 <span style="display: block; font-size: 9px; font-family: monospace; color: #64748b; margin-top: 4px;">${receiptCode}</span>
               </div>
             ` : ''}
@@ -340,8 +340,8 @@ export default function LocataireQuittancesPage() {
       const opt = {
         margin: 8,
         filename: `Quittance_${(payment.period || 'Mois').replace(/\s+/g, '_')}_${tenantName.replace(/\s+/g, '_')}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
+        image: { type: 'png', quality: 1 },
+        html2canvas: { scale: 3, useCORS: true },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
       } as const;
 
@@ -691,7 +691,7 @@ export default function LocataireQuittancesPage() {
                   </div>
                   {qrDataUrl && (
                     <div className="flex flex-col items-center bg-white p-2 rounded-xl border border-gray-200 shadow-sm shrink-0 self-end sm:self-auto">
-                      <img src={qrDataUrl} alt={`QR Code ${receiptCode}`} className="w-24 h-24 object-contain" />
+                      <img src={qrDataUrl} alt={`QR Code ${receiptCode}`} className="w-32 h-32 object-contain [image-rendering:pixelated]" />
                       <span className="text-[9px] font-mono text-gray-500 mt-1">{receiptCode}</span>
                     </div>
                   )}

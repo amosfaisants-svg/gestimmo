@@ -113,8 +113,8 @@ export default function PaymentDetailsPage({ params }: { params: { id: string } 
       const opt = {
         margin: [10, 10, 10, 10],
         filename: `Recu_${receipt ? getPaymentDisplayCode(receipt) : "paiement"}.pdf`,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false },
+        image: { type: "png", quality: 1 },
+        html2canvas: { scale: 3, useCORS: true, logging: false },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
       };
       await html2pdf().set(opt).from(element).save();
@@ -297,7 +297,7 @@ export default function PaymentDetailsPage({ params }: { params: { id: string } 
                 <img
                   src={qrDataUrl}
                   alt={`QR Code Quittance ${getPaymentDisplayCode(receipt)}`}
-                  className="w-24 h-24 object-contain"
+                  className="w-32 h-32 object-contain [image-rendering:pixelated]"
                 />
                 <span className="text-[9px] font-mono text-gray-500 mt-1 tracking-tight">{getPaymentDisplayCode(receipt)}</span>
               </div>
