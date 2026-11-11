@@ -14,13 +14,19 @@ import {
   FileText,
   BadgePercent,
   Banknote,
-  RotateCcw
+  RotateCcw,
+  QrCode,
+  Download,
+  Loader2,
+  X
 } from "lucide-react";
 import Link from "next/link";
-import { formatUnitDisplay, formatFCFA, isUUID } from "@/lib/utils";
+import { formatUnitDisplay, formatFCFA, isUUID, getPaymentDisplayCode } from "@/lib/utils";
 import { getPortalSession } from "@/lib/authSession";
 import { loadAllDataFromDatabase } from "@/lib/dataService";
 import { isPendingRentsVisibleForOwner } from "@/lib/portalSettings";
+import { getStoredCompanyInfo } from "@/lib/companyInfo";
+import { generateReceiptQrDataUrl, resolveApartmentCharacteristics } from "@/lib/qrCodeGenerator";
 
 export default function LoyersEnAttentePage() {
   const [currentOwner, setCurrentOwner] = useState<any>(null);
@@ -32,6 +38,8 @@ export default function LoyersEnAttentePage() {
   const [commissionRate, setCommissionRate] = useState<number>(0);
   const [isFeatureAllowed, setIsFeatureAllowed] = useState(true);
   const [overdueTenantRents, setOverdueTenantRents] = useState<any[]>([]);
+  const [previewQuittanceItem, setPreviewQuittanceItem] = useState<any | null>(null);
+  const [isDownloadingQuittance, setIsDownloadingQuittance] = useState<boolean>(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -243,8 +251,10 @@ export default function LoyersEnAttentePage() {
 
               pendingItems.push({
                 id: p.id || `PND-${idx}`,
+                code: getPaymentDisplayCode(p),
                 date: p.payment_date || (p.created_at ? p.created_at.slice(0, 10) : p.date || "-"),
                 unit: unitName,
+                rawUnit: pUnitRaw || unitName,
                 property: propName,
                 tenant: tenantName,
                 type: displayType,
@@ -254,6 +264,7 @@ export default function LoyersEnAttentePage() {
                 commission: itemCommission,
                 net: itemNet,
                 reference: p.receipt_number || p.receiptNumber || p.transaction_ref || "-",
+                rawPayment: p,
               });
             }
           });
@@ -559,6 +570,7 @@ export default function LoyersEnAttentePage() {
                 <th className="px-6 py-4 font-medium text-right">Commission</th>
                 <th className="px-6 py-4 font-medium text-right">Net à Reverser</th>
                 <th className="px-6 py-4 font-medium text-center">Statut</th>
+                <th className="px-6 py-4 font-medium text-right">Quittance</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-app-border">
@@ -601,11 +613,20 @@ export default function LoyersEnAttentePage() {
                         En attente
                       </Badge>
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <button
+                        onClick={() => setPreviewQuittanceItem(item)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/40 text-primary hover:bg-primary hover:text-white text-xs font-semibold transition-colors shadow-xs cursor-pointer"
+                        title="Afficher la quittance et le QR Code"
+                      >
+                        <QrCode className="w-3.5 h-3.5" /> Quittance
+                      </button>
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center">
+                  <td colSpan={10} className="px-6 py-12 text-center">
                     <div className="max-w-md mx-auto space-y-3">
                       <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
                         <CheckCircle2 className="w-6 h-6" />
@@ -630,6 +651,162 @@ export default function LoyersEnAttentePage() {
           </table>
         </div>
       </div>
+
+      {/* Modal Quittance Individuelle avec QR Code */}
+      {previewQuittanceItem && (() => {
+        const receiptCode = previewQuittanceItem.code || (previewQuittanceItem.id ? `REC-${String(previewQuittanceItem.id).slice(0, 8).toUpperCase()}` : "REC-001");
+        const company = getStoredCompanyInfo();
+        const aptInfo = resolveApartmentCharacteristics({
+          receiptNumber: receiptCode,
+          tenantName: previewQuittanceItem.tenant,
+          period: previewQuittanceItem.period,
+          unit: previewQuittanceItem.rawUnit || previewQuittanceItem.unit,
+          property: previewQuittanceItem.property,
+          amount: previewQuittanceItem.amount,
+          paymentDate: previewQuittanceItem.date,
+          paymentObj: previewQuittanceItem.rawPayment || previewQuittanceItem,
+        });
+        const qrDataUrl = generateReceiptQrDataUrl({
+          receiptNumber: receiptCode,
+          tenantName: previewQuittanceItem.tenant,
+          period: previewQuittanceItem.period,
+          unit: previewQuittanceItem.rawUnit || previewQuittanceItem.unit,
+          property: aptInfo.property || previewQuittanceItem.property,
+          amount: previewQuittanceItem.amount,
+          paymentDate: previewQuittanceItem.date,
+          paymentObj: previewQuittanceItem.rawPayment || previewQuittanceItem,
+        }, 160);
+
+        const handleDownloadPdf = async () => {
+          setIsDownloadingQuittance(true);
+          try {
+            const html2pdf = (await import("html2pdf.js")).default;
+            const element = document.getElementById("owner-pending-quittance-card");
+            if (!element) return;
+            const opt: any = {
+              margin: 10,
+              filename: `Quittance_${receiptCode}_${(previewQuittanceItem.tenant || "Locataire").replace(/\s+/g, "_")}.pdf`,
+              image: { type: "jpeg", quality: 0.98 },
+              html2canvas: { scale: 2, useCORS: true },
+              jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+            };
+            await html2pdf().set(opt).from(element).save();
+          } catch (err) {
+            console.error(err);
+          } finally {
+            setIsDownloadingQuittance(false);
+          }
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl border border-app-border shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+              <div className="p-5 border-b border-app-border flex items-center justify-between bg-gray-50/50">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Quittance de Loyer {receiptCode}</h2>
+                  <p className="text-xs text-gray-500">Locataire : {previewQuittanceItem.tenant} • {previewQuittanceItem.period}</p>
+                </div>
+                <button
+                  onClick={() => setPreviewQuittanceItem(null)}
+                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div id="owner-pending-quittance-card" className="p-6 overflow-y-auto flex-1 space-y-6 bg-white">
+                <div className="flex justify-between items-start border-b border-app-border pb-4">
+                  <div>
+                    <h3 className="text-xl font-bold text-primary">{company.name || "GESTIMMO"}</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">{company.address || "Agence de Gestion Immobilière"}</p>
+                    <p className="text-xs text-gray-400">{company.phone || ""}{company.email ? ` • ${company.email}` : ""}</p>
+                  </div>
+                  <div className="text-right">
+                    <Badge dot variant="success">VALIDÉ</Badge>
+                    <p className="text-xs font-semibold text-gray-900 mt-1.5">N° {receiptCode}</p>
+                    <p className="text-xs text-gray-500">Date : {previewQuittanceItem.date || "-"}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-app-border">
+                  <div>
+                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Reçu de</p>
+                    <p className="text-sm font-bold text-gray-900 mt-0.5">{previewQuittanceItem.tenant}</p>
+                    <p className="text-xs text-gray-600 mt-1">{aptInfo.characteristics || previewQuittanceItem.unit}</p>
+                    <p className="text-xs font-semibold text-gray-700 mt-0.5">{aptInfo.property || previewQuittanceItem.property}</p>
+                  </div>
+                  <div className="sm:text-right">
+                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Période concernée</p>
+                    <p className="text-sm font-bold text-gray-900 mt-0.5">{previewQuittanceItem.period}</p>
+                    <p className="text-xs text-gray-600 mt-1">Mode : {previewQuittanceItem.method || "Paiement validé"}</p>
+                  </div>
+                </div>
+
+                <div className="border border-app-border rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 border-b border-app-border">
+                      <tr>
+                        <th className="px-4 py-2.5 font-semibold text-gray-700">Description</th>
+                        <th className="px-4 py-2.5 font-semibold text-gray-700 text-right">Montant</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-app-border">
+                        <td className="px-4 py-3 text-gray-800">{previewQuittanceItem.type || "Loyer"} et charges locatives — {previewQuittanceItem.period}</td>
+                        <td className="px-4 py-3 text-gray-900 font-semibold text-right">{formatFCFA(previewQuittanceItem.amount)}</td>
+                      </tr>
+                    </tbody>
+                    <tfoot className="bg-gray-50">
+                      <tr>
+                        <td className="px-4 py-3 font-bold text-gray-900 text-right">Total Payé</td>
+                        <td className="px-4 py-3 font-bold text-primary text-base text-right">{formatFCFA(previewQuittanceItem.amount)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2 border-t border-gray-100">
+                  <div>
+                    <div className="flex items-center text-green-600 text-sm font-bold">
+                      <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                      PAIEMENT VALIDÉ
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">Signature électronique : {receiptCode}-VALID</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">Scannez le QR code pour vérifier les informations de la quittance</p>
+                  </div>
+                  {qrDataUrl && (
+                    <div className="flex flex-col items-center bg-white p-2 rounded-xl border border-gray-200 shadow-sm shrink-0 self-end sm:self-auto">
+                      <img src={qrDataUrl} alt={`QR Code ${receiptCode}`} className="w-24 h-24 object-contain" />
+                      <span className="text-[9px] font-mono text-gray-500 mt-1">{receiptCode}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-app-border bg-gray-50/50 flex items-center justify-end gap-2">
+                <button
+                  onClick={() => setPreviewQuittanceItem(null)}
+                  className="bg-white border border-app-border text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Fermer
+                </button>
+                <button
+                  onClick={handleDownloadPdf}
+                  disabled={isDownloadingQuittance}
+                  className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center shadow-sm disabled:opacity-50"
+                >
+                  {isDownloadingQuittance ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4 mr-2" />
+                  )}
+                  Télécharger Quittance PDF
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

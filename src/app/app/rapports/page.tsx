@@ -14,6 +14,7 @@ import { AccessDeniedCard } from "@/components/ui/AccessDeniedCard";
 import { loadAllDataFromDatabase } from "@/lib/dataService";
 import { syncPaymentsWithLeases, formatUnitDisplay, getPaymentDisplayCode } from "@/lib/utils";
 import { getStoredCompanyInfo } from "@/lib/companyInfo";
+import { generateReceiptQrDataUrl, resolveApartmentCharacteristics } from "@/lib/qrCodeGenerator";
 
 const formatFCFA = (amount: number | string) => {
   if (typeof amount === "string") return amount;
@@ -1638,6 +1639,28 @@ export default function RapportsPage() {
     const agencyEmail = company.email || "contact@gestimmo.ci";
     const agencyRccm = company.rccm ? ` • RCCM : ${company.rccm}` : "";
 
+    const aptInfo = resolveApartmentCharacteristics({
+      receiptNumber: receiptCode,
+      tenantName: p.tenant || "Locataire",
+      period: periodLabel,
+      unit: p.unit || p.unitId || unitLabel,
+      property: propName,
+      amount: breakdown.total,
+      paymentDate,
+      paymentObj: p,
+    });
+
+    const qrDataUrl = generateReceiptQrDataUrl({
+      receiptNumber: receiptCode,
+      tenantName: p.tenant || "Locataire",
+      period: periodLabel,
+      unit: p.unit || p.unitId || unitLabel,
+      property: propName,
+      amount: breakdown.total,
+      paymentDate,
+      paymentObj: p,
+    }, 120);
+
     return `
       <div class="quittance-card bg-white border border-gray-300 rounded-xl p-3 shadow-xs text-gray-800 flex flex-col justify-between" style="height: 133mm; max-height: 133mm; width: 100%; box-sizing: border-box; overflow: hidden; page-break-inside: avoid; break-inside: avoid; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
         <!-- En-tête Quittance -->
@@ -1677,10 +1700,10 @@ export default function RapportsPage() {
               <p class="text-[11px] font-bold text-gray-900 truncate mt-0.5" title="${ownerName}">${ownerName}</p>
             </div>
             <div class="mt-1 pt-1 border-t border-gray-200">
-              <span class="text-[8px] font-bold text-gray-400 uppercase tracking-wider block">Bien & Logement Loué</span>
+              <span class="text-[8px] font-bold text-gray-400 uppercase tracking-wider block">Bien & Caractéristiques du Logement</span>
               <div class="flex items-center justify-between gap-1 text-[10px] mt-0.5">
                 <span class="font-semibold text-gray-800 truncate" title="${propName}">🏠 ${propName}</span>
-                <span class="text-primary font-bold whitespace-nowrap bg-white px-1.5 py-0.5 rounded border border-gray-200 text-[9px]">${unitLabel}</span>
+                <span class="text-primary font-bold whitespace-nowrap bg-white px-1.5 py-0.5 rounded border border-gray-200 text-[9px]" title="${aptInfo.characteristics || unitLabel}">${aptInfo.characteristics || unitLabel}</span>
               </div>
             </div>
           </div>
@@ -1769,7 +1792,7 @@ export default function RapportsPage() {
           <strong class="text-gray-800 font-bold">ℹ Mention Légale :</strong> Le présent document certifie que le locataire susmentionné s'est intégralement acquitté du loyer et des charges pour la période désignée. Cette quittance annule tout reçu provisoire antérieur et fait foi de parfait paiement sous réserve de régularisation bancaire éventuelle.
         </div>
 
-        <!-- Cachet & Signatures -->
+        <!-- Cachet, QR Code & Signatures -->
         <div class="grid grid-cols-2 gap-3 items-center pt-1 border-t border-gray-200">
           <div>
             <div class="flex justify-between items-baseline mb-0.5">
@@ -1780,9 +1803,9 @@ export default function RapportsPage() {
               Signature Locataire
             </div>
           </div>
-          <div class="text-right">
-            <div class="inline-block border border-primary/30 rounded-lg px-2.5 py-0.5 text-center bg-primary/5 min-w-[190px]">
-              <p class="text-[8.5px] font-black text-primary tracking-wider uppercase leading-none">GESTIMMO SARL - ABIDJAN</p>
+          <div class="flex items-center justify-end gap-2">
+            <div class="inline-block border border-primary/30 rounded-lg px-2.5 py-0.5 text-center bg-primary/5 min-w-[175px]">
+              <p class="text-[8.5px] font-black text-primary tracking-wider uppercase leading-none">${agencyName}</p>
               <p class="text-[7.5px] text-gray-500 mt-0.5 leading-none">Service Recouvrement & Comptabilité</p>
               <div class="flex items-center justify-center gap-1 mt-0.5 leading-none">
                 <span class="text-[8px] font-bold text-emerald-700">✓ ENCAISSÉ & CERTIFIÉ</span>
@@ -1791,6 +1814,7 @@ export default function RapportsPage() {
               </div>
               <p class="text-[7.5px] text-primary/80 font-bold mt-0.5 leading-none">« Bon Pour Acquit »</p>
             </div>
+            ${qrDataUrl ? `<div class="border border-gray-300 rounded bg-white p-0.5 flex flex-col items-center shrink-0"><img src="${qrDataUrl}" alt="QR Code" style="width: 36px; height: 36px; object-fit: contain; display: block;" /></div>` : ''}
           </div>
         </div>
 

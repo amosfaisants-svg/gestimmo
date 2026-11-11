@@ -2,10 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/Badge";
-import { Download, Loader2, Eye, CheckCircle2, X } from "lucide-react";
-import { formatUnitDisplay, formatFCFA, isUUID } from "@/lib/utils";
+import { Download, Loader2, Eye, CheckCircle2, X, QrCode } from "lucide-react";
+import { formatUnitDisplay, formatFCFA, isUUID, getPaymentDisplayCode } from "@/lib/utils";
 import { getPortalSession } from "@/lib/authSession";
 import { loadAllDataFromDatabase } from "@/lib/dataService";
+import { getStoredCompanyInfo } from "@/lib/companyInfo";
+import { generateReceiptQrDataUrl, resolveApartmentCharacteristics } from "@/lib/qrCodeGenerator";
 
 const formatDateFr = (dateStr?: string) => {
   if (!dateStr) return "-";
@@ -27,6 +29,8 @@ export default function ProprietaireRelevesPage() {
   const [payouts, setPayouts] = useState<any[]>([]);
   const [isDownloadingId, setIsDownloadingId] = useState<string | null>(null);
   const [selectedPayoutDetails, setSelectedPayoutDetails] = useState<any | null>(null);
+  const [previewQuittanceItem, setPreviewQuittanceItem] = useState<any | null>(null);
+  const [isDownloadingQuittance, setIsDownloadingQuittance] = useState<boolean>(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -222,12 +226,17 @@ export default function ProprietaireRelevesPage() {
 
             return [
               {
+                id: payoutItem?.id ? `QUIT-${payoutItem.id}` : "QUIT-001",
+                code: payoutItem?.id ? `REC-${String(payoutItem.id).slice(0, 6).toUpperCase()}` : "REC-001",
                 unit: unitStr,
+                rawUnit: defaultUnit?.id || unitStr,
                 property: defaultProp,
                 tenant: tenantStr,
                 type: "Loyer",
                 period: payoutPeriod || "Période courante",
                 amount: targetCollected > 0 ? targetCollected : 70000,
+                date: payoutItem?.date || new Date().toISOString().slice(0, 10),
+                method: payoutItem?.method || "Paiement validé",
               }
             ];
           }
@@ -259,12 +268,18 @@ export default function ProprietaireRelevesPage() {
             const displayType = isCaution ? "Caution" : isAvance ? "Avance Loyer" : "Loyer";
 
             return {
+              id: p.id || `PAY-${idx + 1}`,
+              code: getPaymentDisplayCode(p),
               unit: unitName,
+              rawUnit: pUnitRaw || unitName,
               property: propName,
               tenant: tenantName,
               type: displayType,
               period: p.period || p.period_month || payoutPeriod,
               amount: Number(p.amount) || 0,
+              date: p.date || p.payment_date || payoutItem?.date || new Date().toISOString().slice(0, 10),
+              method: p.method || p.payment_method || "Paiement validé",
+              rawPayment: p,
             };
           });
         };
@@ -373,18 +388,40 @@ export default function ProprietaireRelevesPage() {
       const commissionAmt = Number(payout.commission) || Math.max(0, collectedAmt - netAmt);
       const effectiveRate = collectedAmt > 0 && commissionAmt > 0 ? Math.round((commissionAmt / collectedAmt) * 100) : 0;
 
-      const paymentRowsHtml = paymentsList.map((item: any) => {
+      const paymentRowsHtml = paymentsList.map((item: any, idx: number) => {
         const isCaution = item.type?.toLowerCase().includes("caution");
         const isAvance = item.type?.toLowerCase().includes("avance");
         const badgeBg = isCaution ? "#f3e8ff" : isAvance ? "#fef3c7" : "#eff6ff";
         const badgeColor = isCaution ? "#6b21a8" : isAvance ? "#b45309" : "#1d4ed8";
         const badgeBorder = isCaution ? "#d8b4fe" : isAvance ? "#fde68a" : "#bfdbfe";
+        const receiptCode = item.code || (item.id ? `REC-${String(item.id).slice(0, 8).toUpperCase()}` : `REC-00${idx + 1}`);
+        const aptInfo = resolveApartmentCharacteristics({
+          receiptNumber: receiptCode,
+          tenantName: item.tenant,
+          period: item.period,
+          unit: item.rawUnit || item.unit,
+          property: item.property,
+          amount: item.amount,
+          paymentDate: item.date || payout.date,
+          paymentObj: item.rawPayment || item,
+        });
+        const rowQrUrl = generateReceiptQrDataUrl({
+          receiptNumber: receiptCode,
+          tenantName: item.tenant,
+          period: item.period,
+          unit: item.rawUnit || item.unit,
+          property: aptInfo.property || item.property,
+          amount: item.amount,
+          paymentDate: item.date || payout.date,
+          paymentObj: item.rawPayment || item,
+        }, 90);
 
         return `
           <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="padding: 10px 12px; font-weight: 700; color: #0f172a; font-size: 13px;">
-              ${item.unit}
-              ${item.property ? `<span style="display:block; font-size:11px; font-weight:normal; color:#64748b; margin-top: 2px;">${item.property}</span>` : ''}
+            <td style="padding: 10px 12px; font-weight: 700; color: #0f172a; font-size: 12.5px;">
+              ${aptInfo.characteristics || item.unit}
+              ${(aptInfo.property || item.property) ? `<span style="display:block; font-size:11px; font-weight:normal; color:#64748b; margin-top: 2px;">${aptInfo.property || item.property}</span>` : ''}
+              <span style="display:block; font-size:10px; font-family:monospace; color:#2563eb; margin-top: 2px;">Quittance N° ${receiptCode}</span>
             </td>
             <td style="padding: 10px 12px; color: #334155; font-size: 13px; font-weight: 500;">${item.tenant}</td>
             <td style="padding: 10px 12px;">
@@ -394,6 +431,9 @@ export default function ProprietaireRelevesPage() {
             </td>
             <td style="padding: 10px 12px; color: #475569; font-size: 13px;">${item.period}</td>
             <td style="padding: 10px 12px; text-align: right; font-weight: 700; color: #0f172a; font-size: 13px;">${formatFCFA(item.amount)}</td>
+            <td style="padding: 6px 10px; text-align: center;">
+              ${rowQrUrl ? `<img src="${rowQrUrl}" alt="QR ${receiptCode}" style="width: 44px; height: 44px; display: inline-block;" />` : '-'}
+            </td>
           </tr>
         `;
       }).join('');
@@ -444,17 +484,18 @@ export default function ProprietaireRelevesPage() {
           <table style="width: 100%; border-collapse: collapse; margin-bottom: 22px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
             <thead>
               <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1; text-align: left;">
-                <th style="padding: 10px 12px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Appartement</th>
+                <th style="padding: 10px 12px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Appartement & Quittance</th>
                 <th style="padding: 10px 12px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Locataire</th>
-                <th style="padding: 10px 12px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Objet du paiement</th>
-                <th style="padding: 10px 12px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Période concernée</th>
+                <th style="padding: 10px 12px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Objet</th>
+                <th style="padding: 10px 12px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Période</th>
                 <th style="padding: 10px 12px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase; text-align: right;">Montant</th>
+                <th style="padding: 10px 10px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase; text-align: center;">QR Code</th>
               </tr>
             </thead>
             <tbody>
               ${paymentRowsHtml.length > 0 ? paymentRowsHtml : `
                 <tr>
-                  <td colspan="5" style="padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">Aucun détail disponible.</td>
+                  <td colspan="6" style="padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">Aucun détail disponible.</td>
                 </tr>
               `}
             </tbody>
@@ -522,6 +563,127 @@ export default function ProprietaireRelevesPage() {
       window.print();
     } finally {
       setIsDownloadingId(null);
+    }
+  };
+
+  const handleDownloadQuittancePdf = async (item: any) => {
+    setIsDownloadingQuittance(true);
+    try {
+      const html2pdf = (await import("html2pdf.js")).default;
+      const receiptCode = item.code || (item.id ? `REC-${String(item.id).slice(0, 8).toUpperCase()}` : "REC-001");
+      const company = getStoredCompanyInfo();
+      const aptInfo = resolveApartmentCharacteristics({
+        receiptNumber: receiptCode,
+        tenantName: item.tenant,
+        period: item.period,
+        unit: item.rawUnit || item.unit,
+        property: item.property,
+        amount: item.amount,
+        paymentDate: item.date,
+        paymentObj: item.rawPayment || item,
+      });
+      const qrDataUrl = generateReceiptQrDataUrl({
+        receiptNumber: receiptCode,
+        tenantName: item.tenant,
+        period: item.period,
+        unit: item.rawUnit || item.unit,
+        property: aptInfo.property || item.property,
+        amount: item.amount,
+        paymentDate: item.date,
+        paymentObj: item.rawPayment || item,
+      }, 150);
+
+      const element = document.createElement("div");
+      element.innerHTML = `
+        <div style="padding: 40px; font-family: 'Helvetica Neue', Arial, sans-serif; color: #1e293b; max-width: 750px; margin: 0 auto; background: #ffffff;">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #2563eb; padding-bottom: 20px; margin-bottom: 25px;">
+            <div>
+              <h1 style="color: #2563eb; font-size: 26px; font-weight: 800; margin: 0; letter-spacing: -0.025em;">${company.name || "GESTIMMO"}</h1>
+              <p style="font-size: 13px; color: #64748b; margin: 4px 0 0 0; font-weight: 500;">${company.address || "Gestion Immobilière & Administration de Biens"}</p>
+              <p style="font-size: 12px; color: #94a3b8; margin: 2px 0 0 0;">${company.phone ? `Tél : ${company.phone}` : "Abidjan, Côte d'Ivoire"}${company.email ? ` • ${company.email}` : ""}</p>
+            </div>
+            <div style="text-align: right;">
+              <div style="display: inline-block; background: #dcfce7; color: #15803d; font-weight: 700; padding: 6px 16px; border-radius: 9999px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">
+                VALIDÉ
+              </div>
+              <h2 style="font-size: 18px; font-weight: 700; color: #0f172a; margin: 0;">QUITTANCE DE LOYER</h2>
+              <p style="font-size: 13px; color: #64748b; margin: 4px 0 0 0;">N° ${receiptCode}</p>
+            </div>
+          </div>
+
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 25px; display: flex; justify-content: space-between;">
+            <div>
+              <p style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin: 0 0 6px 0; letter-spacing: 0.05em;">Locataire & Appartement</p>
+              <p style="font-size: 16px; font-weight: 700; color: #0f172a; margin: 0;">${item.tenant}</p>
+              <p style="font-size: 13px; color: #475569; margin: 4px 0 0 0;">Bien : <strong>${aptInfo.property || item.property || "-"}</strong></p>
+              <p style="font-size: 13px; color: #475569; margin: 2px 0 0 0;">Caractéristiques : <strong>${aptInfo.characteristics || item.unit}</strong></p>
+            </div>
+            <div style="text-align: right;">
+              <p style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin: 0 0 6px 0; letter-spacing: 0.05em;">Détails du Paiement</p>
+              <p style="font-size: 13px; color: #475569; margin: 0;">Période : <strong style="color: #0f172a;">${item.period}</strong></p>
+              <p style="font-size: 13px; color: #475569; margin: 4px 0 0 0;">Date de paiement : <strong style="color: #0f172a;">${item.date || "-"}</strong></p>
+              <p style="font-size: 13px; color: #475569; margin: 4px 0 0 0;">Mode : <strong style="color: #0f172a;">${item.method || "Paiement validé"}</strong></p>
+            </div>
+          </div>
+
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; font-size: 14px;">
+            <thead>
+              <tr style="background: #f1f5f9; border-bottom: 2px solid #cbd5e1; text-align: left;">
+                <th style="padding: 12px 16px; font-weight: 700; color: #334155; font-size: 12px; text-transform: uppercase;">Désignation</th>
+                <th style="padding: 12px 16px; font-weight: 700; color: #334155; font-size: 12px; text-transform: uppercase; text-align: right;">Montant</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding: 16px; color: #334155; font-weight: 500;">
+                  ${item.type || "Loyer"} et charges locatives — ${item.period}
+                </td>
+                <td style="padding: 16px; color: #0f172a; font-weight: 700; text-align: right;">
+                  ${formatFCFA(item.amount)}
+                </td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr style="background: #f8fafc;">
+                <td style="padding: 16px; font-weight: 700; color: #0f172a; text-align: right; font-size: 15px;">
+                  TOTAL REÇU ET ACQUITTÉ :
+                </td>
+                <td style="padding: 16px; font-weight: 800; color: #2563eb; font-size: 18px; text-align: right;">
+                  ${formatFCFA(item.amount)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 20px;">
+            <div>
+              <p style="font-size: 12px; font-weight: 700; color: #15803d; margin: 0 0 4px 0;">✓ PAIEMENT VALIDÉ & CERTIFIÉ</p>
+              <p style="font-size: 11px; color: #64748b; margin: 0;">Signature électronique : ${receiptCode}-VALID</p>
+              <p style="font-size: 11px; color: #94a3b8; margin: 4px 0 0 0;">Scannez le QR code pour vérifier les informations de la quittance</p>
+            </div>
+            ${qrDataUrl ? `
+              <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; background: #ffffff; text-align: center;">
+                <img src="${qrDataUrl}" alt="QR Code Quittance" style="width: 90px; height: 90px; display: block; margin: 0 auto;" />
+                <span style="display: block; font-size: 9px; font-family: monospace; color: #64748b; margin-top: 4px;">${receiptCode}</span>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+
+      const opt: any = {
+        margin: 8,
+        filename: `Quittance_${receiptCode}_${(item.tenant || "Locataire").replace(/\s+/g, "_")}.pdf`,
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+      };
+
+      await html2pdf().set(opt).from(element).save();
+    } catch (err) {
+      console.error("Erreur génération PDF quittance:", err);
+    } finally {
+      setIsDownloadingQuittance(false);
     }
   };
 
@@ -686,7 +848,7 @@ export default function ProprietaireRelevesPage() {
 
                 <div className="border border-app-border rounded-xl overflow-hidden shadow-sm bg-white">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse min-w-[500px]">
+                    <table className="w-full text-left text-xs border-collapse min-w-[540px]">
                       <thead>
                         <tr className="bg-gray-100/80 text-gray-600 font-semibold border-b border-app-border">
                           <th className="py-2.5 px-3">Appartement</th>
@@ -694,6 +856,7 @@ export default function ProprietaireRelevesPage() {
                           <th className="py-2.5 px-3">Objet du paiement</th>
                           <th className="py-2.5 px-3">Période concernée</th>
                           <th className="py-2.5 px-3 text-right">Montant</th>
+                          <th className="py-2.5 px-3 text-right">Quittance</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
@@ -727,12 +890,21 @@ export default function ProprietaireRelevesPage() {
                                 <td className="py-3 px-3 text-right font-bold text-gray-900 whitespace-nowrap">
                                   {formatFCFA(item.amount)}
                                 </td>
+                                <td className="py-3 px-3 text-right whitespace-nowrap">
+                                  <button
+                                    onClick={() => setPreviewQuittanceItem(item)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-primary/40 text-primary hover:bg-primary hover:text-white text-[11px] font-semibold transition-colors cursor-pointer"
+                                    title="Afficher la quittance et le QR Code"
+                                  >
+                                    <QrCode className="w-3.5 h-3.5" /> Quittance
+                                  </button>
+                                </td>
                               </tr>
                             );
                           })
                         ) : (
                           <tr>
-                            <td colSpan={5} className="py-4 px-3 text-center text-gray-500">
+                            <td colSpan={6} className="py-4 px-3 text-center text-gray-500">
                               Aucun détail de paiement disponible.
                             </td>
                           </tr>
@@ -820,6 +992,141 @@ export default function ProprietaireRelevesPage() {
           </div>
         </div>
       )}
+
+      {/* Modal Quittance Individuelle avec QR Code */}
+      {previewQuittanceItem && (() => {
+        const receiptCode = previewQuittanceItem.code || (previewQuittanceItem.id ? `REC-${String(previewQuittanceItem.id).slice(0, 8).toUpperCase()}` : "REC-001");
+        const company = getStoredCompanyInfo();
+        const aptInfo = resolveApartmentCharacteristics({
+          receiptNumber: receiptCode,
+          tenantName: previewQuittanceItem.tenant,
+          period: previewQuittanceItem.period,
+          unit: previewQuittanceItem.rawUnit || previewQuittanceItem.unit,
+          property: previewQuittanceItem.property,
+          amount: previewQuittanceItem.amount,
+          paymentDate: previewQuittanceItem.date,
+          paymentObj: previewQuittanceItem.rawPayment || previewQuittanceItem,
+        });
+        const qrDataUrl = generateReceiptQrDataUrl({
+          receiptNumber: receiptCode,
+          tenantName: previewQuittanceItem.tenant,
+          period: previewQuittanceItem.period,
+          unit: previewQuittanceItem.rawUnit || previewQuittanceItem.unit,
+          property: aptInfo.property || previewQuittanceItem.property,
+          amount: previewQuittanceItem.amount,
+          paymentDate: previewQuittanceItem.date,
+          paymentObj: previewQuittanceItem.rawPayment || previewQuittanceItem,
+        }, 160);
+
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl border border-app-border shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+              <div className="p-5 border-b border-app-border flex items-center justify-between bg-gray-50/50">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Quittance de Loyer {receiptCode}</h2>
+                  <p className="text-xs text-gray-500">Locataire : {previewQuittanceItem.tenant} • {previewQuittanceItem.period}</p>
+                </div>
+                <button
+                  onClick={() => setPreviewQuittanceItem(null)}
+                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                <div className="flex justify-between items-start border-b border-app-border pb-4">
+                  <div>
+                    <h3 className="text-xl font-bold text-primary">{company.name || "GESTIMMO"}</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">{company.address || "Agence de Gestion Immobilière"}</p>
+                    <p className="text-xs text-gray-400">{company.phone || ""}{company.email ? ` • ${company.email}` : ""}</p>
+                  </div>
+                  <div className="text-right">
+                    <Badge dot variant="success">VALIDÉ</Badge>
+                    <p className="text-xs font-semibold text-gray-900 mt-1.5">N° {receiptCode}</p>
+                    <p className="text-xs text-gray-500">Date : {previewQuittanceItem.date || "-"}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-app-border">
+                  <div>
+                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Reçu de</p>
+                    <p className="text-sm font-bold text-gray-900 mt-0.5">{previewQuittanceItem.tenant}</p>
+                    <p className="text-xs text-gray-600 mt-1">{aptInfo.characteristics || previewQuittanceItem.unit}</p>
+                    <p className="text-xs font-semibold text-gray-700 mt-0.5">{aptInfo.property || previewQuittanceItem.property}</p>
+                  </div>
+                  <div className="sm:text-right">
+                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Période concernée</p>
+                    <p className="text-sm font-bold text-gray-900 mt-0.5">{previewQuittanceItem.period}</p>
+                    <p className="text-xs text-gray-600 mt-1">Mode : {previewQuittanceItem.method || "Paiement validé"}</p>
+                  </div>
+                </div>
+
+                <div className="border border-app-border rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 border-b border-app-border">
+                      <tr>
+                        <th className="px-4 py-2.5 font-semibold text-gray-700">Description</th>
+                        <th className="px-4 py-2.5 font-semibold text-gray-700 text-right">Montant</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-app-border">
+                        <td className="px-4 py-3 text-gray-800">{previewQuittanceItem.type || "Loyer"} et charges locatives — {previewQuittanceItem.period}</td>
+                        <td className="px-4 py-3 text-gray-900 font-semibold text-right">{formatFCFA(previewQuittanceItem.amount)}</td>
+                      </tr>
+                    </tbody>
+                    <tfoot className="bg-gray-50">
+                      <tr>
+                        <td className="px-4 py-3 font-bold text-gray-900 text-right">Total Payé</td>
+                        <td className="px-4 py-3 font-bold text-primary text-base text-right">{formatFCFA(previewQuittanceItem.amount)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2 border-t border-gray-100">
+                  <div>
+                    <div className="flex items-center text-green-600 text-sm font-bold">
+                      <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                      PAIEMENT VALIDÉ
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">Signature électronique : {receiptCode}-VALID</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">Scannez le QR code pour vérifier les informations de la quittance</p>
+                  </div>
+                  {qrDataUrl && (
+                    <div className="flex flex-col items-center bg-white p-2 rounded-xl border border-gray-200 shadow-sm shrink-0 self-end sm:self-auto">
+                      <img src={qrDataUrl} alt={`QR Code ${receiptCode}`} className="w-24 h-24 object-contain" />
+                      <span className="text-[9px] font-mono text-gray-500 mt-1">{receiptCode}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-app-border bg-gray-50/50 flex items-center justify-end gap-2">
+                <button
+                  onClick={() => setPreviewQuittanceItem(null)}
+                  className="bg-white border border-app-border text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Fermer
+                </button>
+                <button
+                  onClick={() => handleDownloadQuittancePdf(previewQuittanceItem)}
+                  disabled={isDownloadingQuittance}
+                  className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center shadow-sm disabled:opacity-50"
+                >
+                  {isDownloadingQuittance ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4 mr-2" />
+                  )}
+                  Télécharger Quittance PDF
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

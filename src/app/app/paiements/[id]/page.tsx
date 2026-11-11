@@ -6,6 +6,7 @@ import { ArrowLeft, Download, Printer, CheckCircle2, Loader2 } from "lucide-reac
 import Link from "next/link";
 import { formatUnitDisplay, getPaymentDisplayCode } from "@/lib/utils";
 import { getStoredCompanyInfo, CompanyInfo } from "@/lib/companyInfo";
+import { generateReceiptQrDataUrl, resolveApartmentCharacteristics } from "@/lib/qrCodeGenerator";
 
 const formatFCFA = (amount: number | string) => {
   if (typeof amount === "string") return amount;
@@ -96,7 +97,7 @@ export default function PaymentDetailsPage({ params }: { params: { id: string } 
 
       // 4. Fallback if still empty
       if (!propName || propName === "-") {
-        propName = "Résidence Les Flamboyants";
+        propName = "";
       }
 
       setResolvedProperty(propName);
@@ -126,6 +127,29 @@ export default function PaymentDetailsPage({ params }: { params: { id: string } 
   };
 
   if (!receipt) return <div className="p-8 text-center text-gray-500">Paiement introuvable ou en cours de chargement...</div>;
+
+  const aptInfo = resolveApartmentCharacteristics({
+    receiptNumber: getPaymentDisplayCode(receipt),
+    tenantName: receipt.tenant,
+    period: receipt.period,
+    unit: receipt.unit,
+    property: resolvedProperty || receipt.property,
+    amount: receipt.amount,
+    paymentDate: receipt.date,
+    paymentObj: receipt,
+  });
+
+  const qrDataUrl = generateReceiptQrDataUrl({
+    receiptNumber: getPaymentDisplayCode(receipt),
+    tenantName: receipt.tenant,
+    period: receipt.period,
+    unit: receipt.unit,
+    property: resolvedProperty || receipt.property,
+    amount: receipt.amount,
+    paymentDate: receipt.date,
+    paymentObj: receipt,
+  }, 160);
+
   return (
     <div className="space-y-6 pt-12 md:pt-0 pb-12">
       {/* Header */}
@@ -187,8 +211,8 @@ export default function PaymentDetailsPage({ params }: { params: { id: string } 
           <div>
             <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Reçu de :</h4>
             <p className="text-base font-bold text-gray-900">{receipt.tenant}</p>
-            <p className="text-sm text-gray-600 mt-1">{formatUnitDisplay(receipt.unit).toLowerCase().startsWith("studio") || formatUnitDisplay(receipt.unit).toLowerCase().startsWith("appartement") || formatUnitDisplay(receipt.unit).toLowerCase().startsWith("villa") || formatUnitDisplay(receipt.unit).toLowerCase().startsWith("magasin") ? formatUnitDisplay(receipt.unit) : `Appartement ${formatUnitDisplay(receipt.unit)}`}</p>
-            <p className="text-sm font-semibold text-gray-700 mt-0.5">{resolvedProperty || receipt.property}</p>
+            <p className="text-sm text-gray-600 mt-1">{aptInfo.characteristics || (formatUnitDisplay(receipt.unit).toLowerCase().startsWith("studio") || formatUnitDisplay(receipt.unit).toLowerCase().startsWith("appartement") || formatUnitDisplay(receipt.unit).toLowerCase().startsWith("villa") || formatUnitDisplay(receipt.unit).toLowerCase().startsWith("magasin") ? formatUnitDisplay(receipt.unit) : `Appartement ${formatUnitDisplay(receipt.unit)}`)}</p>
+            <p className="text-sm font-semibold text-gray-700 mt-0.5">{aptInfo.property || resolvedProperty || receipt.property}</p>
           </div>
           <div className="text-right">
             <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Période concernée :</h4>
@@ -243,7 +267,7 @@ export default function PaymentDetailsPage({ params }: { params: { id: string } 
           </table>
         </div>
 
-        <div className="grid grid-cols-2 gap-8 text-sm">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 text-sm pt-2 border-t border-gray-100">
           <div>
             <h4 className="font-semibold text-gray-900 mb-1">Détails du paiement</h4>
             <p className="text-gray-600">Mode: {receipt.method}</p>
@@ -259,12 +283,25 @@ export default function PaymentDetailsPage({ params }: { params: { id: string } 
               <p className="text-gray-500 italic mt-3 text-xs bg-gray-50 p-2 rounded-lg border border-gray-100">{receipt.notes}</p>
             )}
           </div>
-          <div className="flex flex-col items-end justify-end">
-            <div className="flex items-center text-green-600 mb-2">
-              <CheckCircle2 className="w-5 h-5 mr-2" />
-              <span className="font-bold">PAIEMENT VALIDÉ</span>
+          <div className="flex items-center gap-5 self-end">
+            <div className="flex flex-col items-end justify-end text-right">
+              <div className="flex items-center text-green-600 mb-1.5">
+                <CheckCircle2 className="w-5 h-5 mr-2" />
+                <span className="font-bold">PAIEMENT VALIDÉ</span>
+              </div>
+              <p className="text-xs text-gray-400">Signature électronique : {getPaymentDisplayCode(receipt)}-VALID</p>
+              <p className="text-[10px] text-gray-400 mt-1">Scannez le QR code pour vérifier les informations de la quittance</p>
             </div>
-            <p className="text-xs text-gray-400">Signature électronique : {getPaymentDisplayCode(receipt)}-VALID</p>
+            {qrDataUrl && (
+              <div className="flex flex-col items-center bg-white p-2 rounded-xl border border-gray-200 shadow-sm shrink-0">
+                <img
+                  src={qrDataUrl}
+                  alt={`QR Code Quittance ${getPaymentDisplayCode(receipt)}`}
+                  className="w-24 h-24 object-contain"
+                />
+                <span className="text-[9px] font-mono text-gray-500 mt-1 tracking-tight">{getPaymentDisplayCode(receipt)}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

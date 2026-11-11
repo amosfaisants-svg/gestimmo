@@ -7,8 +7,9 @@ import {
   Download, ArrowRight, Lock, QrCode, FileText, Check, 
   Sparkles, Clock, AlertCircle, PhoneCall
 } from "lucide-react";
-import { formatFCFA, formatUnitDisplay } from "@/lib/utils";
+import { formatFCFA, formatUnitDisplay, getPaymentDisplayCode } from "@/lib/utils";
 import { createPayment } from "@/lib/dataService";
+import { generateReceiptQrDataUrl, resolveApartmentCharacteristics } from "@/lib/qrCodeGenerator";
 
 interface TenantPaymentModalProps {
   isOpen: boolean;
@@ -247,6 +248,29 @@ export function TenantPaymentModal({
     try {
       const html2pdf = (await import("html2pdf.js")).default;
       const cleanUnit = formatUnitDisplay(completedPayment.unit || unitId);
+      const receiptCode = completedPayment.receiptNumber || getPaymentDisplayCode(completedPayment);
+
+      const aptInfo = resolveApartmentCharacteristics({
+        receiptNumber: receiptCode,
+        tenantName,
+        period,
+        unit: completedPayment.unit || unitId,
+        property: propertyName,
+        amount: completedPayment.amount,
+        paymentDate: completedPayment.date,
+        paymentObj: completedPayment,
+      });
+
+      const qrDataUrl = generateReceiptQrDataUrl({
+        receiptNumber: receiptCode,
+        tenantName,
+        period,
+        unit: completedPayment.unit || unitId,
+        property: aptInfo.property || propertyName,
+        amount: completedPayment.amount,
+        paymentDate: completedPayment.date,
+        paymentObj: completedPayment,
+      }, 150);
 
       const element = document.createElement("div");
       element.innerHTML = `
@@ -262,16 +286,16 @@ export function TenantPaymentModal({
                 PAYÉ EN LIGNE • VALIDÉ
               </div>
               <h2 style="font-size: 18px; font-weight: 700; color: #0f172a; margin: 0;">QUITTANCE DE LOYER</h2>
-              <p style="font-size: 13px; color: #64748b; margin: 4px 0 0 0;">Réf : ${completedPayment.receiptNumber || completedPayment.id}</p>
+              <p style="font-size: 13px; color: #64748b; margin: 4px 0 0 0;">Réf : ${receiptCode}</p>
             </div>
           </div>
 
           <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 25px; display: flex; justify-content: space-between;">
             <div>
-              <p style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin: 0 0 6px 0; letter-spacing: 0.05em;">Locataire Débiteur</p>
+              <p style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin: 0 0 6px 0; letter-spacing: 0.05em;">Locataire & Appartement</p>
               <p style="font-size: 16px; font-weight: 700; color: #0f172a; margin: 0;">${tenantName}</p>
-              <p style="font-size: 13px; color: #475569; margin: 4px 0 0 0;">Bien : <strong>${propertyName}</strong></p>
-              <p style="font-size: 13px; color: #475569; margin: 2px 0 0 0;">Logement : <strong>${cleanUnit}</strong></p>
+              <p style="font-size: 13px; color: #475569; margin: 4px 0 0 0;">Bien : <strong>${aptInfo.property || propertyName}</strong></p>
+              <p style="font-size: 13px; color: #475569; margin: 2px 0 0 0;">Caractéristiques : <strong>${aptInfo.characteristics || cleanUnit}</strong></p>
             </div>
             <div style="text-align: right;">
               <p style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin: 0 0 6px 0; letter-spacing: 0.05em;">Modalités de Règlement</p>
@@ -282,7 +306,7 @@ export function TenantPaymentModal({
             </div>
           </div>
 
-          <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px;">
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; font-size: 14px;">
             <thead>
               <tr style="background: #f1f5f9; border-bottom: 2px solid #cbd5e1; text-align: left;">
                 <th style="padding: 12px 16px; font-weight: 700; color: #334155; font-size: 12px; text-transform: uppercase;">Désignation des Prestations</th>
@@ -319,13 +343,22 @@ export function TenantPaymentModal({
             </tfoot>
           </table>
 
-          <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 14px; margin-bottom: 30px; font-size: 12px; color: #1e40af;">
+          <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 14px; margin-bottom: 20px; font-size: 12px; color: #1e40af;">
             <strong>Mention Légale :</strong> Le présent document constitue une quittance de loyer certifiée conforme délivrée sous réserve de parfait encaissement. Il fait foi du règlement de l'échéance susvisée.
           </div>
 
           <div style="border-top: 1px solid #e2e8f0; padding-top: 20px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #94a3b8;">
-            <p style="margin: 0;">Document généré électroniquement • Système certifié GESTIMMO</p>
-            <p style="margin: 0; font-weight: 600;">Authentification Sécurisée Mobile Money CI</p>
+            <div>
+              <p style="margin: 0 0 4px 0; font-size: 12px; font-weight: 700; color: #15803d;">✓ PAIEMENT VALIDÉ & CERTIFIÉ</p>
+              <p style="margin: 0;">Document généré électroniquement • Système certifié GESTIMMO</p>
+              <p style="margin: 4px 0 0 0; font-weight: 600;">Authentification Sécurisée Mobile Money CI • Scannez le QR code pour vérifier</p>
+            </div>
+            ${qrDataUrl ? `
+              <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; background: #ffffff; text-align: center;">
+                <img src="${qrDataUrl}" alt="QR Code Quittance" style="width: 90px; height: 90px; display: block; margin: 0 auto;" />
+                <span style="display: block; font-size: 9px; font-family: monospace; color: #64748b; margin-top: 4px;">${receiptCode}</span>
+              </div>
+            ` : ''}
           </div>
         </div>
       `;
@@ -593,16 +626,36 @@ export function TenantPaymentModal({
               </div>
 
               <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-between text-xs">
-                <span className="text-gray-500">Réf. Opérateur :</span>
-                <button
-                  type="button"
-                  onClick={copyRefToClipboard}
-                  className="font-mono font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
-                  title="Copier la référence"
-                >
-                  <span>{completedPayment?.transferNumber || "TXN-891230"}</span>
-                  {hasCopiedRef ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Sparkles className="w-3.5 h-3.5" />}
-                </button>
+                <div>
+                  <span className="text-gray-500 block">Réf. Opérateur :</span>
+                  <button
+                    type="button"
+                    onClick={copyRefToClipboard}
+                    className="font-mono font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer mt-0.5"
+                    title="Copier la référence"
+                  >
+                    <span>{completedPayment?.transferNumber || "TXN-891230"}</span>
+                    {hasCopiedRef ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  </button>
+                  <p className="text-[10px] text-gray-500 mt-1">Scannez le QR code pour vérifier la quittance</p>
+                </div>
+                {completedPayment && (() => {
+                  const qrUrl = generateReceiptQrDataUrl({
+                    receiptNumber: completedPayment.receiptNumber || getPaymentDisplayCode(completedPayment),
+                    tenantName,
+                    period,
+                    unit: completedPayment.unit || unitId,
+                    property: propertyName,
+                    amount: completedPayment.amount || rentAmount,
+                    paymentDate: completedPayment.date,
+                    paymentObj: completedPayment,
+                  }, 120);
+                  return qrUrl ? (
+                    <div className="bg-white p-1.5 rounded-xl border border-emerald-200 shadow-xs shrink-0">
+                      <img src={qrUrl} alt="QR Code Quittance" className="w-20 h-20 object-contain" />
+                    </div>
+                  ) : null;
+                })()}
               </div>
             </div>
 
